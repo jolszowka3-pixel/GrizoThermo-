@@ -9,6 +9,18 @@ from fpdf import FPDF
 st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
 
 # ==========================================
+# DANE TWOJEJ FIRMY (WYSTAWCY DOKUMENTÓW WZ)
+# ==========================================
+# Wpisz tutaj prawdziwe dane swojej firmy. Będą one zawsze na stałe na każdym dokumencie WZ.
+MOJA_FIRMA = {
+    "nazwa": "GrizoThermo Sp. z o.o.",
+    "adres": "ul. Fabryczna 14A\n44-100 Katowice",
+    "nip": "NIP: 1234567890",
+    "kontakt": "biuro@grizothermo.pl",
+    "miejscowosc_wystawienia": "Katowice"
+}
+
+# ==========================================
 # POBIERANIE CZCIONEK DLA POLSKICH ZNAKÓW
 # ==========================================
 @st.cache_resource
@@ -24,8 +36,8 @@ def pobierz_czcionki():
 # ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
 # ==========================================
-if 'init_v9' not in st.session_state:
-    st.session_state.init_v9 = True
+if 'init_v10' not in st.session_state:
+    st.session_state.init_v10 = True
     
     st.session_state.wz_counter = 1
     
@@ -151,7 +163,6 @@ if uprawnienia.get("produkcja", False):
     opcje_menu.append("Moduł Produkcji")
 if uprawnienia.get("magazyn", False):
     opcje_menu.append("Operacje Magazynowe (PZ/WZ)")
-    # Baza kontrahentów widoczna dla osób mających dostęp do PZ/WZ
     opcje_menu.append("Baza Kontrahentów (CRM)")
 if uprawnienia.get("admin", False):
     opcje_menu.append("Panel Administracyjny")
@@ -259,7 +270,7 @@ elif menu == "Moduł Produkcji":
                 st.rerun()
 
 # ------------------------------------------
-# ZAKŁADKA 3: BAZA KONTRAHENTÓW (Wydzielona)
+# ZAKŁADKA 3: BAZA KONTRAHENTÓW (CRM)
 # ------------------------------------------
 elif menu == "Baza Kontrahentów (CRM)":
     st.header("Baza Kontrahentów (Klienci i Dostawcy)")
@@ -368,7 +379,6 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         st.session_state.wz_counter += 1
                         
                         font_path, font_bold_path = pobierz_czcionki()
-                        wystawiono_miejscowosc = "Katowice"
                         
                         pdf = FPDF()
                         pdf.add_page()
@@ -377,7 +387,9 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         
                         pdf.set_font("Roboto", "", 9)
                         data_aktualna = datetime.now().strftime("%Y-%m-%d")
-                        pdf.cell(95, 5, f"Wystawiono dnia: {data_aktualna}, {wystawiono_miejscowosc}", border=0, ln=0)
+                        
+                        # Użycie zmiennych z konfiguracji MOJA_FIRMA
+                        pdf.cell(95, 5, f"Wystawiono dnia: {data_aktualna}, {MOJA_FIRMA['miejscowosc_wystawienia']}", border=0, ln=0)
                         
                         pdf.set_font("Roboto", "B", 13)
                         pdf.cell(95, 5, f"Wydanie Zewnętrzne nr {nr_doc_wz}", border=0, ln=1, align='R')
@@ -385,12 +397,15 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         
                         y_blok_stron = pdf.get_y()
                         
+                        # Lewa kolumna - Dynamicznie wczytywana Twoja firma
                         pdf.set_font("Roboto", "B", 10)
                         pdf.cell(95, 5, "Sprzedawca:", border=0, ln=1)
                         pdf.set_font("Roboto", "", 9)
-                        pdf.multi_cell(95, 5, "GrizoThermo Sp. z o.o.\nul. Fabryczna 14A\n44-100 Katowice\nNIP: 1234567890\nbiuro@grizothermo.pl")
+                        firma_tekst = f"{MOJA_FIRMA['nazwa']}\n{MOJA_FIRMA['adres']}\n{MOJA_FIRMA['nip']}\n{MOJA_FIRMA['kontakt']}"
+                        pdf.multi_cell(95, 5, firma_tekst)
                         y_koniec_sprzedawcy = pdf.get_y()
                         
+                        # Prawa kolumna - Odbiorca
                         pdf.set_xy(110, y_blok_stron)
                         pdf.set_font("Roboto", "B", 10)
                         pdf.cell(95, 5, "Nabywca / Odbiorca:", border=0, ln=1)
