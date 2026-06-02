@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY
+# 1. INICJALIZACJA BAZY 
 # ==========================================
-if 'init_v21' not in st.session_state:
-    st.session_state.init_v21 = True
+if 'init_v22' not in st.session_state:
+    st.session_state.init_v22 = True
     st.session_state.wz_counter = 1
     
     st.session_state.uzytkownicy = {
@@ -62,9 +62,9 @@ if 'init_v21' not in st.session_state:
     st.session_state.aktualne_uprawnienia = {}
     
     st.session_state.komponenty = pd.DataFrame([
-        {"ID": "K01", "Nazwa": "Aluminium zbrojone 1,15m", "Stan": 3200.0, "Jednostka": "mb", "Min_Stan": 1000.0},
-        {"ID": "K02", "Nazwa": "Barwnik biały", "Stan": 15.0, "Jednostka": "kg", "Min_Stan": 5.0},
-        {"ID": "K03", "Nazwa": "Barwnik zielony", "Stan": 12.0, "Jednostka": "kg", "Min_Stan": 3.0}
+        {"ID": "K01", "Nazwa": "Aluminium zbrojone 1,15m", "Stan": 3200.0, "Jednostka": "mb"},
+        {"ID": "K02", "Nazwa": "Barwnik biały", "Stan": 15.0, "Jednostka": "kg"},
+        {"ID": "K03", "Nazwa": "Barwnik zielony", "Stan": 12.0, "Jednostka": "kg"}
     ])
     
     st.session_state.polprodukty = pd.DataFrame([
@@ -78,7 +78,6 @@ if 'init_v21' not in st.session_state:
     for szer in szerokosci:
         for war in warianty_wykonczenia:
             nazwa_produktu = f"GrizoThermo+ {szer}cm - {war} (13mb)"
-            zuzycie_bazy = round(13.0 * (szer / 115.0), 2)
             produkty_list.append({
                 "Wariant": nazwa_produktu,
                 "Stan": 0,
@@ -86,7 +85,13 @@ if 'init_v21' not in st.session_state:
             })
             
     st.session_state.produkty = pd.DataFrame(produkty_list)
-    st.session_state.receptura_baza = {"K01": 13.00, "K02": 0.195, "K03": 0.104}
+    
+    # AKTUALIZACJA RECEPTURY ZGODNIE Z TWOIMI WYMIARAMI NA 1 SZTUKĘ JUMBO
+    st.session_state.receptura_baza = {
+        "K01": 32.00,  # 32 mb aluminium zbrojonego
+        "K02": 0.200,  # 0.2 kg barwnika białego
+        "K03": 0.100   # 0.1 kg barwnika zielonego
+    }
     
     st.session_state.historia = pd.DataFrame(columns=[
         "Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"
@@ -101,7 +106,7 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-# Minimalistyczny, oczyszczony styl CSS
+# CSS
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
@@ -219,9 +224,9 @@ elif menu == "Moduł Production":
         m_jumbo = min(m_alu, m_bia, m_zie)
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("Aluminium wystarczy na:", f"{m_alu} szt.")
-        c2.metric("Barwnik biały wystarczy na:", f"{m_bia} szt.")
-        c3.metric("Barwnik zielony wystarczy na:", f"{m_zie} szt.")
+        c1.metric("Aluminium wystarczy na:", f"{m_alu} szt. Jumbo")
+        c2.metric("Barwnik biały wystarczy na:", f"{m_bia} szt. Jumbo")
+        c3.metric("Barwnik zielony wystarczy na:", f"{m_zie} szt. Jumbo")
         
         st.divider()
         
@@ -311,7 +316,6 @@ elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
     
-    # Inicjalizacja koszyka w pamięci sesji
     if "wz_koszyk" not in st.session_state:
         st.session_state.wz_koszyk = []
     
@@ -348,7 +352,6 @@ elif menu == "Wydanie Towaru (WZ)":
             opcje_list = []
             opcje_map = {}
             for _, r in dostepne_produkty.iterrows():
-                # Sprawdzamy ile sztuk danego wariantu jest już w koszyku, by odpowiednio zablokować możliwość wydania ponad stan
                 wystepuje_w_koszyku = sum(item["Ilosc"] for item in st.session_state.wz_koszyk if item["Wariant"] == r["Wariant"])
                 efektywny_stan = int(r["Stan"] - wystepuje_w_koszyku)
                 
@@ -392,7 +395,7 @@ elif menu == "Wydanie Towaru (WZ)":
                 
                 col_btn1, col_btn2 = st.columns(2)
                 with col_btn1:
-                    if st.button("Wyczyść listę produktów", use_container_width=True):
+                    if st.button("Wyczyść lista produktów", use_container_width=True):
                         st.session_state.wz_koszyk = []
                         st.rerun()
                 with col_btn2:
@@ -458,7 +461,6 @@ elif menu == "Wydanie Towaru (WZ)":
                             pdf.cell(30, 8, str(ile_w), border=1, align='C')
                             pdf.cell(30, 8, "szt.", border=1, align='C', ln=1)
                             
-                            # Odjęcie ze stanu głównego
                             idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
                             st.session_state.produkty.at[idx, "Stan"] -= ile_w
                             
@@ -487,7 +489,6 @@ elif menu == "Wydanie Towaru (WZ)":
                         pdf.set_x(135)
                         pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
                         
-                        # Wyczyszczenie koszyka po udanym wygenerowaniu
                         st.session_state.wz_koszyk = []
                         st.session_state.wygenerowane_pdf = bytes(pdf.output())
                         st.session_state.nazwa_pliku_wz = f"{nr_wz_auto.replace('/', '_')}.pdf"
