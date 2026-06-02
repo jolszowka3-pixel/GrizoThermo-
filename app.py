@@ -340,9 +340,23 @@ elif menu == "Moduł Production":
             zuzycie_maty_na_sztuke = st.session_state.produkty[st.session_state.produkty["Wariant"] == wybrany_wariant]["Zuzycie_Maty"].values[0]
             
             max_sztuk_wariantu = int(stan_maty / zuzycie_maty_na_sztuke) if zuzycie_maty_na_sztuke > 0 else 0
-            st.caption(f"Ta rolka wymaga ekwiwalentu {zuzycie_maty_na_sztuke} mb pełnowymiarowej maty bazowej. Możesz wyciąć maksymalnie: {max_sztuk_wariantu} szt.")
+            st.caption(f"Ta rolka wymaga {zuzycie_maty_na_sztuke} mb maty bazowej. Maksymalnie możesz pociąć: {max_sztuk_wariantu} szt.")
             
-            ile_sztuk = st.number_input("Wprowadź ilość gotowych rolek (szt.)", min_value=1, max_value=max_sztuk_wariantu if max_sztuk_wariantu > 0 else 1, value=1 if max_sztuk_wariantu > 0 else 0)
+            # Bezpiecznik:
+            if max_sztuk_wariantu > 0:
+                ile_sztuk = st.number_input("Ile gotowych sztuk skonfekcjonowano?", min_value=1, max_value=max_sztuk_wariantu, value=1)
+                submit_button = st.form_submit_button("Zatwierdź rozkrój i konfekcję")
+            else:
+                st.error("Brak maty bazowej do konfekcji!")
+                submit_button = st.form_submit_button("Zatwierdź", disabled=True)
+            
+            if submit_button:
+           ile_sztuk = st.number_input(
+    "Ile gotowych sztuk skonfekcjonowano?", 
+    min_value=1, 
+    max_value=max_sztuk_wariantu if max_sztuk_wariantu > 0 else 1, 
+    value=1 if max_sztuk_wariantu > 0 else 1  # Zmieniono z 0 na 1, gdy brak zapasu
+)
             
             if st.form_submit_button("Zatwierdź rozkrój i konfekcję", disabled=(max_sztuk_wariantu == 0)):
                 zuzyte_mb = round(ile_sztuk * zuzycie_maty_na_sztuke, 2)
