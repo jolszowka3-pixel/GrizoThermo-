@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY 
+# 1. INICJALIZACJA BAZY
 # ==========================================
-if 'init_v20' not in st.session_state:
-    st.session_state.init_v20 = True
+if 'init_v21' not in st.session_state:
+    st.session_state.init_v21 = True
     st.session_state.wz_counter = 1
     
     st.session_state.uzytkownicy = {
@@ -61,11 +61,10 @@ if 'init_v20' not in st.session_state:
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
     
-    # Surowce bazowe
     st.session_state.komponenty = pd.DataFrame([
-        {"ID": "K01", "Nazwa": "Aluminium zbrojone 1,15m", "Stan": 3200.0, "Jednostka": "mb"},
-        {"ID": "K02", "Nazwa": "Barwnik biały", "Stan": 15.0, "Jednostka": "kg"},
-        {"ID": "K03", "Nazwa": "Barwnik zielony", "Stan": 12.0, "Jednostka": "kg"}
+        {"ID": "K01", "Nazwa": "Aluminium zbrojone 1,15m", "Stan": 3200.0, "Jednostka": "mb", "Min_Stan": 1000.0},
+        {"ID": "K02", "Nazwa": "Barwnik biały", "Stan": 15.0, "Jednostka": "kg", "Min_Stan": 5.0},
+        {"ID": "K03", "Nazwa": "Barwnik zielony", "Stan": 12.0, "Jednostka": "kg", "Min_Stan": 3.0}
     ])
     
     st.session_state.polprodukty = pd.DataFrame([
@@ -79,6 +78,7 @@ if 'init_v20' not in st.session_state:
     for szer in szerokosci:
         for war in warianty_wykonczenia:
             nazwa_produktu = f"GrizoThermo+ {szer}cm - {war} (13mb)"
+            zuzycie_bazy = round(13.0 * (szer / 115.0), 2)
             produkty_list.append({
                 "Wariant": nazwa_produktu,
                 "Stan": 0,
@@ -86,7 +86,6 @@ if 'init_v20' not in st.session_state:
             })
             
     st.session_state.produkty = pd.DataFrame(produkty_list)
-    
     st.session_state.receptura_baza = {"K01": 13.00, "K02": 0.195, "K03": 0.104}
     
     st.session_state.historia = pd.DataFrame(columns=[
@@ -169,9 +168,6 @@ if menu == "Pulpit Główny":
     
     st.divider()
     
-    # ----------------------------------------------------
-    # SYSTEM SZYBKIEGO OSTRZEGANIA - MONITOROWANIE 20 ROLEK
-    # ----------------------------------------------------
     braki_surowcowe = []
     for _, row_k in st.session_state.komponenty.iterrows():
         prog_alarmowy = st.session_state.receptura_baza.get(row_k['ID'], 0) * 20
@@ -223,7 +219,7 @@ elif menu == "Moduł Production":
         m_jumbo = min(m_alu, m_bia, m_zie)
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("Alu wystarczy na:", f"{m_alu} szt.")
+        c1.metric("Aluminium wystarczy na:", f"{m_alu} szt.")
         c2.metric("Barwnik biały wystarczy na:", f"{m_bia} szt.")
         c3.metric("Barwnik zielony wystarczy na:", f"{m_zie} szt.")
         
@@ -281,7 +277,7 @@ elif menu == "Moduł Production":
             elif zuzyte_cm < wymagane_cm:
                 st.warning(f"Suma szerokości wynosi {zuzyte_cm} cm. Rozdysponuj jeszcze {wymagane_cm - zuzyte_cm} cm.")
             else:
-                st.error(f"Suma szerokości wynosi {zuzyte_cm} cm. Przekroczyłeś limit o {zuzyte_cm - wymagane_cm} cm!")
+                st.error(f"Suma szerokości wynosi {zuzyte_cm} cm. Przekroczono limit o {zuzyte_cm - wymagane_cm} cm!")
         else:
             st.warning("Brak rolek Jumbo na magazynie. Wyprodukuj je w Kroku 1.")
 
@@ -315,6 +311,10 @@ elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
     
+    # Inicjalizacja koszyka w pamięci sesji
+    if "wz_koszyk" not in st.session_state:
+        st.session_state.wz_koszyk = []
+    
     if "wygenerowane_pdf" in st.session_state:
         st.success("Transakcja zaksięgowana. Dokument gotowy do pobrania.")
         c1, c2 = st.columns(2)
@@ -329,52 +329,74 @@ elif menu == "Wydanie Towaru (WZ)":
     else:
         dostepne_produkty = st.session_state.produkty[st.session_state.produkty["Stan"] > 0].copy()
         
-        if dostepne_produkty.empty:
+        if dostepne_produkty.empty and not st.session_state.wz_koszyk:
             st.error("Brak gotowych produktów na magazynie! Wykonaj rozkrój z rolki Jumbo w module Produkcji.")
         else:
             data_dzis_str = datetime.now().strftime("%Y/%m/%d")
             nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
             
-            with st.form("wz_form"):
-                st.subheader("1. Dane Odbiorcy i Dokumentu")
-                col_f1, col_f2 = st.columns(2)
-                with col_f1:
-                    nr_doc_wz = st.text_input("Numer dokumentu (Auto)", value=nr_wz_auto, disabled=True)
-                    wybrany_klient = st.selectbox("Nabywca (Wybierz z bazy)", odbiorcy)
-                with col_f2:
-                    uwagi_doc = st.text_input("Uwagi do dokumentu", value="Dostawa z magazynu głównego.")
+            st.subheader("1. Dane Odbiorcy i Dokumentu")
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                wybrany_klient = st.selectbox("Nabywca (Wybierz z bazy)", odbiorcy)
+            with col_f2:
+                uwagi_doc = st.text_input("Uwagi do dokumentu", value="Dostawa z magazynu głównego.")
+                
+            st.divider()
+            st.subheader("2. Dodaj produkty do wydania")
+            
+            opcje_list = []
+            opcje_map = {}
+            for _, r in dostepne_produkty.iterrows():
+                # Sprawdzamy ile sztuk danego wariantu jest już w koszyku, by odpowiednio zablokować możliwość wydania ponad stan
+                wystepuje_w_koszyku = sum(item["Ilosc"] for item in st.session_state.wz_koszyk if item["Wariant"] == r["Wariant"])
+                efektywny_stan = int(r["Stan"] - wystepuje_w_koszyku)
+                
+                if efektywny_stan > 0:
+                    label = f"{r['Wariant']} (Dostępne: {efektywny_stan} szt.)"
+                    opcje_list.append(label)
+                    opcje_map[label] = (r["Wariant"], efektywny_stan)
+            
+            if not opcje_list:
+                st.info("Wszystkie dostępne produkty zostały już dodane do listy wydania na dole strony.")
+            else:
+                col_p1, col_p2, col_p3 = st.columns([3, 1, 1])
+                with col_p1:
+                    wybrana_opcja = st.selectbox("Wybierz asortyment z magazynu", opcje_list)
+                
+                prawdziwa_nazwa, max_dostepne = opcje_map[wybrana_opcja]
+                
+                with col_p2:
+                    ile_wydac = st.number_input("Ilość do wydania", min_value=1, max_value=max_dostepne, value=1, step=1)
                     
-                st.divider()
-                st.subheader("2. Koszyk Wydania: Zaznacz produkty i ilości")
-                
-                df_do_edycji = dostepne_produkty[["Wariant", "Stan"]].copy()
-                df_do_edycji["Wydajemy (szt.)"] = 0
-                
-                zmienione_dane = st.data_editor(
-                    df_do_edycji,
-                    hide_index=True,
-                    use_container_width=True,
-                    column_config={
-                        "Wariant": st.column_config.TextColumn("Nazwa asortymentu", disabled=True),
-                        "Stan": st.column_config.NumberColumn("Dostępne na magazynie", disabled=True),
-                        "Wydajemy (szt.)": st.column_config.NumberColumn("Ilość do wydania", min_value=0, step=1)
-                    }
-                )
+                with col_p3:
+                    st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                    if st.button("Dodaj do dokumentu", use_container_width=True):
+                        istnieje = False
+                        for item in st.session_state.wz_koszyk:
+                            if item["Wariant"] == prawdziwa_nazwa:
+                                item["Ilosc"] += ile_wydac
+                                istnieje = True
+                                break
+                        if not istnieje:
+                            st.session_state.wz_koszyk.append({"Wariant": prawdziwa_nazwa, "Ilosc": ile_wydac})
+                        st.rerun()
 
-                if st.form_submit_button("Zatwierdź wydanie i generuj PDF"):
-                    wybrane_do_wydania = zmienione_dane[zmienione_dane["Wydajemy (szt.)"] > 0]
-                    bledy = False
-                    
-                    if wybrane_do_wydania.empty:
-                        st.error("Wprowadź ilość większą niż 0 dla przynajmniej jednego produktu.")
-                        bledy = True
-                    
-                    for _, row in wybrane_do_wydania.iterrows():
-                        if row["Wydajemy (szt.)"] > row["Stan"]:
-                            st.error(f"Niewystarczający zapas dla wariantu '{row['Wariant']}'. Dostępne: {int(row['Stan'])} szt.")
-                            bledy = True
-                            
-                    if not bledy:
+            if st.session_state.wz_koszyk:
+                st.divider()
+                st.subheader("3. Podsumowanie dokumentu WZ")
+                
+                df_koszyk = pd.DataFrame(st.session_state.wz_koszyk)
+                df_koszyk.columns = ["Nazwa asortymentu", "Ilość do wydania (szt.)"]
+                st.dataframe(df_koszyk, use_container_width=True, hide_index=True)
+                
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("Wyczyść listę produktów", use_container_width=True):
+                        st.session_state.wz_koszyk = []
+                        st.rerun()
+                with col_btn2:
+                    if st.button("Zatwierdź wydanie i generuj PDF", type="primary", use_container_width=True):
                         dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
                         klient_adres = dane_klienta["Adres"]
                         klient_nip = dane_klienta["NIP"]
@@ -427,15 +449,16 @@ elif menu == "Wydanie Towaru (WZ)":
                         pdf.set_font("Roboto", "", 9)
                         
                         lp = 1
-                        for _, row in wybrane_do_wydania.iterrows():
-                            nazwa_w = row["Wariant"]
-                            ile_w = int(row["Wydajemy (szt.)"])
+                        for pozycja in st.session_state.wz_koszyk:
+                            nazwa_w = pozycja["Wariant"]
+                            ile_w = pozycja["Ilosc"]
                             
                             pdf.cell(15, 8, str(lp), border=1, align='C')
                             pdf.cell(115, 8, nazwa_w, border=1, align='L')
                             pdf.cell(30, 8, str(ile_w), border=1, align='C')
                             pdf.cell(30, 8, "szt.", border=1, align='C', ln=1)
                             
+                            # Odjęcie ze stanu głównego
                             idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
                             st.session_state.produkty.at[idx, "Stan"] -= ile_w
                             
@@ -464,6 +487,8 @@ elif menu == "Wydanie Towaru (WZ)":
                         pdf.set_x(135)
                         pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
                         
+                        # Wyczyszczenie koszyka po udanym wygenerowaniu
+                        st.session_state.wz_koszyk = []
                         st.session_state.wygenerowane_pdf = bytes(pdf.output())
                         st.session_state.nazwa_pliku_wz = f"{nr_wz_auto.replace('/', '_')}.pdf"
                         st.rerun()
