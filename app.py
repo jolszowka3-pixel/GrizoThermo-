@@ -8,8 +8,9 @@ st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
 # ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
 # ==========================================
-if 'init_v2' not in st.session_state:
-    st.session_state.init_v2 = True
+# Zmieniono na init_v3, aby wymusić odświeżenie pamięci podręcznej!
+if 'init_v3' not in st.session_state:
+    st.session_state.init_v3 = True
     
     # Baza użytkowników (System Granularnych Uprawnień)
     st.session_state.uzytkownicy = {
@@ -73,12 +74,15 @@ def koloruj_status(val):
             return 'color: #2e7d32; font-weight: 500;' 
     return ''
 
-# CSS
+# CSS dla profesjonalnego wyglądu
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
         .stTabs [data-baseweb="tab-list"] { gap: 24px; }
         .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: transparent; border-radius: 4px 4px 0px 0px; gap: 1px; padding-top: 10px; padding-bottom: 10px; }
+        .big-metric { font-size: 4rem; font-weight: 700; margin: 0; padding: 0; line-height: 1.2; text-align: center; }
+        .big-metric-label { font-size: 1.2rem; color: #6c757d; text-align: center; margin-bottom: 1rem; font-weight: 500; }
+        .metric-card { background-color: #ffffff; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e9ecef; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -122,8 +126,7 @@ if st.sidebar.button("🚪 Wyloguj", use_container_width=True):
 
 st.sidebar.divider()
 
-# Generowanie menu w oparciu o przypisane uprawnienia
-opcje_menu = ["Pulpit Magazynowy"] # Dostępne dla każdego zalogowanego
+opcje_menu = ["Pulpit Główny"]
 
 uprawnienia = st.session_state.aktualne_uprawnienia
 
@@ -139,15 +142,56 @@ if uprawnienia.get("admin", False):
 menu = st.sidebar.radio("Wybierz moduł:", opcje_menu)
 
 # ------------------------------------------
-# ZAKŁADKA 1: PULPIT I STANY
+# ZAKŁADKA 1: PULPIT GŁÓWNY (Z WIELKIMI WSKAŹNIKAMI)
 # ------------------------------------------
-if menu == "Pulpit Magazynowy":
-    st.header("Aktualne Stany Magazynowe")
+if menu == "Pulpit Główny":
+    st.header("Pulpit Zarządzania: GrizoThermo+")
     
+    # OBLICZENIA DLA WSKAŹNIKÓW
+    wybrany_wariant = "GrizoThermo+ (1,15m x 13mb)"
+    
+    # 1. Stan wyrobów gotowych
+    stan_gotowych = int(st.session_state.produkty.loc[st.session_state.produkty["Wariant"] == wybrany_wariant, "Stan"].values[0])
+    
+    # 2. Potencjał produkcyjny (Wąskie gardło)
+    stan_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
+    stan_bialy = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K02", "Stan"].values[0]
+    stan_zielony = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K03", "Stan"].values[0]
+
+    potencjal_alu = int(stan_alu / 32.0)
+    potencjal_bialy = int(stan_bialy / 0.2)
+    potencjal_zielony = int(stan_zielony / 0.1)
+    max_rolek = min(potencjal_alu, potencjal_bialy, potencjal_zielony)
+
+    # WYŚWIETLANIE WIELKICH KAFELKÓW (HTML/CSS)
+    colA, colB = st.columns(2)
+    
+    with colA:
+        st.markdown(f"""
+        <div class="metric-card">
+            <p class="big-metric-label">📦 STAN MAGAZYNU (GOTOWE ROLKI)</p>
+            <p class="big-metric" style="color: #205493;">{stan_gotowych} szt.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with colB:
+        # Jeśli nie można wyprodukować niczego, kolor zmienia się na czerwony, jeśli można - na zielony
+        kolor_potencjalu = "#2e7d32" if max_rolek > 0 else "#d32f2f"
+        st.markdown(f"""
+        <div class="metric-card">
+            <p class="big-metric-label">🚀 POTENCJAŁ PRODUKCYJNY Z OBECNYCH SUROWCÓW</p>
+            <p class="big-metric" style="color: {kolor_potencjalu};">{max_rolek} szt.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.write("") # Odstęp
+    st.divider()
+    st.write("#### Szczegóły magazynowe")
+
+    # RESZTA PULPITU - TABELE
     tab_prod, tab_komp, tab_hist = st.tabs(["Wyroby Gotowe", "Surowce i Komponenty", "Historia Operacji"])
     
     with tab_prod:
-        st.subheader("Stan magazynu produktów gotowych")
         st.dataframe(
             st.session_state.produkty, 
             use_container_width=True, 
@@ -159,10 +203,8 @@ if menu == "Pulpit Magazynowy":
         )
     
     with tab_komp:
-        st.subheader("Stan magazynu surowców")
         df_k = st.session_state.komponenty.copy()
         df_k["Status"] = df_k.apply(lambda row: "Niski stan" if row["Stan"] <= row["Min_Stan"] else "W normie", axis=1)
-        
         styled_df_k = df_k.style.map(koloruj_status, subset=['Status'])
         
         st.dataframe(
@@ -178,7 +220,6 @@ if menu == "Pulpit Magazynowy":
         )
         
     with tab_hist:
-        st.subheader("Ostatnie ruchy magazynowe")
         st.dataframe(
             st.session_state.historia.sort_values(by="Data", ascending=False), 
             use_container_width=True, 
@@ -213,7 +254,7 @@ elif menu == "Moduł Produkcji":
     max_rolek = min(potencjal_alu, potencjal_bialy, potencjal_zielony)
 
     with tab_kalk:
-        st.write("#### Prognoza produkcji na podstawie obecnych stanów magazynowych")
+        st.write("#### Szczegółowe zapotrzebowanie surowcowe")
         col1, col2, col3 = st.columns(3)
         col1.metric("Zapas: Aluminium", f"{potencjal_alu} szt.")
         col2.metric("Zapas: Barw. biały", f"{potencjal_bialy} szt.")
@@ -292,7 +333,7 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                     st.error("Odrzucono: Niewystarczająca ilość asortymentu na magazynie.")
 
 # ------------------------------------------
-# ZAKŁADKA 4: PANEL ADMINA (TYLKO Z UPRAWNIENIEM)
+# ZAKŁADKA 4: PANEL ADMINA
 # ------------------------------------------
 elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.get("admin", False):
     st.header("Narzędzia Administracyjne")
@@ -348,7 +389,7 @@ elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.g
                             "admin": upr_admin
                         }
                     }
-                    st.success(f"Pomyślnie utworzono nowe konto z wybranymi uprawnieniami dla: {nowe_imie}!")
+                    st.success(f"Pomyślnie utworzono nowe konto dla: {nowe_imie}!")
                     st.rerun()
 
     # --- KOREKTA SUROWCÓW ---
