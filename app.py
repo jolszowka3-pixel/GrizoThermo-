@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V25)
+# 1. INICJALIZACJA BAZY (WERSJA V26)
 # ==========================================
-if 'init_v25' not in st.session_state:
-    st.session_state.init_v25 = True
+if 'init_v26' not in st.session_state:
+    st.session_state.init_v26 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -93,7 +93,6 @@ if 'init_v25' not in st.session_state:
         "Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"
     ])
     
-    # TRWAŁE REPOZYTORIA DLA ARCHIWUM DOKUMENTÓW PDF
     st.session_state.archiwum_wz_pdf = []
     st.session_state.archiwum_jumbo_pdf = []
     st.session_state.archiwum_konf_pdf = []
@@ -107,7 +106,7 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-# CSS
+# CSS Corporate Style
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
@@ -154,7 +153,7 @@ if st.sidebar.button("Wyloguj", use_container_width=True):
     st.rerun()
 
 st.sidebar.divider()
-opcje = ["Pulpit Główny"]
+opcje = ["Pulpit Główny", "Stan Magazynu"]
 if st.session_state.aktualne_uprawnienia.get("produkcja"): opcje.append("Moduł Production")
 if st.session_state.aktualne_uprawnienia.get("pz"): opcje.append("Przyjęcie Towaru (PZ)")
 if st.session_state.aktualne_uprawnienia.get("wz"): opcje.append("Wydanie Towaru (WZ)")
@@ -166,56 +165,103 @@ if st.session_state.aktualne_uprawnienia.get("admin"): opcje.append("Panel Admin
 menu = st.sidebar.radio("Wybierz moduł:", opcje)
 
 # ==========================================
-# MODUŁY
+# MODUŁ 1: PULPIT GŁÓWNY (DASHBOARD)
 # ==========================================
 if menu == "Pulpit Główny":
     st.header("Pulpit Zarządzania: GrizoThermo+")
-    colA, colB = st.columns(2)
-    colA.metric("STAN MAGAZYNU (SUMA GOTOWYCH ROLEK)", f"{int(st.session_state.produkty['Stan'].sum())} szt.")
-    colB.metric("MATERIAŁ DO KONFEKCJI (ROLKA JUMBO)", f"{int(st.session_state.polprodukty.loc[0, 'Stan'])} szt.")
+    st.write("Podsumowanie operacyjne i statystyki krytyczne przedsiębiorstwa.")
+    
+    # Obliczenia do KPI
+    suma_gotowych = int(st.session_state.produkty["Stan"].sum())
+    stan_jumbo = int(st.session_state.polprodukty.loc[0, "Stan"])
+    stan_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
+    liczba_wz = len(st.session_state.archiwum_wz_pdf)
+
+    # Siatka wskaźników
+    col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+    col_kpi1.metric("WYROBY GOTOWE (SUMA)", f"{suma_gotowych} szt.")
+    col_kpi2.metric("ROLKI JUMBO NA STANIE", f"{stan_jumbo} szt.")
+    col_kpi3.metric("ZAPAS ALUMINIUM", f"{stan_alu:g} mb")
+    col_kpi4.metric("WYSTAWIONE DOKUMENTY WZ", f"{liczba_wz} szt.")
     
     st.divider()
     
+    # Wykrywanie i alerty braków surowcowych
     braki_surowcowe = []
     for _, row_k in st.session_state.komponenty.iterrows():
         prog_alarmowy = st.session_state.receptura_baza.get(row_k['ID'], 0) * 20
         if row_k['Stan'] < prog_alarmowy:
             niedobor = prog_alarmowy - row_k['Stan']
-            braki_surowcowe.append(f"{row_k['Nazwa']} (Aktualnie: {row_k['Stan']:g} {row_k['Jednostka']}, Brakuje: {niedobor:g} {row_k['Jednostka']})")
+            braki_surowcowe.append(f"{row_k['Nazwa']} (Aktualnie: {row_k['Stan']:g} {row_k['Jednostka']}, Deficyt: {niedobor:g} {row_k['Jednostka']})")
             
     if braki_surowcowe:
-        st.error("KOMUNIKAT SYSTEMOWY: Krytyczny stan surowców\n\nZapas następujących materiałów uniemożliwia wyprodukowanie partii 20 rolek Jumbo:\n\n" + "\n".join([f"* {b}" for b in braki_surowcowe]))
-        st.write("")
+        st.error("ALERT: Krytyczny poziom surowców produkcyjnych\n\nBieżący stan magazynowy poniżej uniemożliwia realizację partii 20 sztuk rolek Jumbo:\n\n" + "\n".join([f"* {b}" for b in braki_surowcowe]))
+    else:
+        st.success("Wszystkie surowce bazowe zabezpieczają minimum produkcyjne na 20 sztuk rolek Jumbo.")
 
-    tab_prod, tab_polprod, tab_komp, tab_hist = st.tabs(["Wyroby Gotowe", "Półprodukty", "Surowce", "Historia Operacji"])
+    # Układ dwukolumnowy dolny: Wykres i Ostatnie Ruchy
+    st.write("")
+    col_dash1, col_dash2 = st.columns([2, 3])
+    
+    with col_dash1:
+        st.subheader("Porównanie Stanu Surowców")
+        # Generowanie prostego wykresu Streamlit dla surowców
+        df_chart = st.session_state.komponenty[["Nazwa", "Stan"]].set_index("Nazwa")
+        st.bar_chart(df_chart, y="Stan", color="#1e40af")
+        
+    with col_dash2:
+        st.subheader("Ostatnie Operacje Systemowe")
+        if st.session_state.historia.empty:
+            st.info("Brak zarejestrowanych zdarzeń w bieżącej sesji.")
+        else:
+            st.dataframe(
+                st.session_state.historia.sort_values(by="Data", ascending=False).head(5),
+                use_container_width=True,
+                hide_index=True
+            )
+
+# ==========================================
+# MODUŁ 2: STAN MAGAZYNU (WYDZIELONY)
+# ==========================================
+elif menu == "Stan Magazynu":
+    st.header("Ewidencja Stanów Magazynowych")
+    st.write("Podgląd fizycznego asortymentu, półproduktów oraz komponentów w przedsiębiorstwie.")
+    
+    tab_prod, tab_polprod, tab_komp = st.tabs([
+        "Magazyn Wyrobów Gotowych", 
+        "Magazyn Półproduktów (Jumbo)", 
+        "Magazyn Surowców Bazowych"
+    ])
     
     with tab_prod:
-        pokaz_wszystkie = st.checkbox("Pokaż warianty z zerowym stanem", value=True)
+        pokaz_wszystkie = st.checkbox("Wyświetl warianty z zerowym stanem magazynowym", value=True)
+        st.write("")
         for _, row in st.session_state.produkty.iterrows():
             if row['Stan'] > 0 or pokaz_wszystkie:
-                st.markdown(f'<div class="item-card"><div class="card-title">{row["Wariant"]}</div><div class="card-details">Stan magazynu: {int(row["Stan"])} szt.</div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="item-card"><div class="card-title">{row["Wariant"]}</div><div class="card-details">Szerokość handlowa: {row["Szerokosc"]} cm | Stan: {int(row["Stan"])} szt.</div></div>', unsafe_allow_html=True)
 
     with tab_polprod:
+        st.write("")
         row_p = st.session_state.polprodukty.iloc[0]
-        st.markdown(f'<div class="item-card item-card-purple"><div class="card-title">{row_p["Nazwa"]}</div><div class="card-details">Stan magazynu: {int(row_p["Stan"])} szt.</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="item-card item-card-purple"><div class="card-title">{row_p["Nazwa"]}</div><div class="card-details">Przeznaczenie: Surowiec do rozkroju wzdłużnego | Stan: {int(row_p["Stan"])} szt.</div></div>', unsafe_allow_html=True)
 
     with tab_komp:
+        st.write("")
         for _, row in st.session_state.komponenty.iterrows():
             prog_alarmowy = st.session_state.receptura_baza.get(row['ID'], 0) * 20
             jest_malo = row['Stan'] < prog_alarmowy
             
             alert = "item-card-alert" if jest_malo else "item-card-ok"
-            status_txt = f"Niski stan - brak na 20 rolek (Wymagane minimum: {prog_alarmowy:g} {row['Jednostka']})" if jest_malo else "Zapas zabezpieczony"
-            st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan: {row["Stan"]:g} {row["Jednostka"]} ({status_txt})</div></div>', unsafe_allow_html=True)
+            status_txt = "Niski stan" if jest_malo else "Zabezpieczony"
+            st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {row["Stan"]:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
-    with tab_hist:
-        st.dataframe(st.session_state.historia.sort_values(by="Data", ascending=False), use_container_width=True, hide_index=True)
-
+# ==========================================
+# MODUŁ 3: PRODUKCJA (DWUETAPOWA Z RAPORTAMI PDF)
+# ==========================================
 elif menu == "Moduł Production":
     st.header("Zarządzanie Produkcją")
     tab1, tab2 = st.tabs(["KROK 1: Maszyna Główna", "KROK 2: Konfekcja"])
     
-    # DYNAMICZNY PODGLĄD GENEROWANEGO PLIKU PDF NA GÓRZE STRONY PRODUKCYJNEJ
     if "ostatnia_produkcja_pdf" in st.session_state:
         st.success(f"Zaksięgowano pomyślnie raport: {st.session_state.nazwa_pliku_produkcji}")
         st.download_button(
@@ -257,7 +303,6 @@ elif menu == "Moduł Production":
                     nazwa_p = st.session_state.polprodukty.at[0, "Nazwa"]
                     dodaj_ruch("PW (Półprod.)", nr_jmb_auto, nazwa_p, ile_jumbo, "Wytłaczarka")
                     
-                    # GENEROWANIE DOKUMENTU PDF DLA JUMBO
                     font_path, font_bold_path = pobierz_czcionki()
                     pdf = FPDF()
                     pdf.add_page()
@@ -345,7 +390,6 @@ elif menu == "Moduł Production":
                     st.session_state.polprodukty.at[0, "Stan"] -= ile_tniemy
                     dodaj_ruch("RW (Półprod.)", nr_knf_auto, "Rolka Jumbo (115cm x 13mb)", ile_tniemy, "Konfekcja")
                     
-                    # INICJALIZACJA PDF DLA ROZKROJU KONFEKCJI
                     font_path, font_bold_path = pobierz_czcionki()
                     pdf = FPDF()
                     pdf.add_page()
@@ -620,9 +664,9 @@ elif menu == "Wydanie Towaru (WZ)":
                         st.session_state.wz_koszyk = []
                         st.rerun()
 
-# ------------------------------------------
-# CENTRALNE ARCHIWUM WSZYSTKICH PLIKÓW PDF
-# ------------------------------------------
+# ==========================================
+# ARCHIWUM DOKUMENTÓW (Z PEŁNYMI PLIKAMI PDF)
+# ==========================================
 elif menu == "Archiwum Dokumentów":
     st.header("Archiwum Dokumentów Operacyjnych i Technologicznych")
     
@@ -633,7 +677,6 @@ elif menu == "Archiwum Dokumentów":
         "Produkcja - Konfekcja i Rozkrój"
     ])
     
-    # 1. ARCHIWUM WZ (POBIERANIE PDF)
     with tab_arch_wz:
         st.subheader("Rejestr Dokumentów WZ")
         if not st.session_state.archiwum_wz_pdf:
@@ -654,7 +697,6 @@ elif menu == "Archiwum Dokumentów":
                 key="btn_dl_wz"
             )
 
-    # 2. ARCHIWUM PZ (REJESTR TEKSTOWY)
     with tab_arch_pz:
         st.subheader("Rejestr Dokumentów PZ")
         df_pz = st.session_state.historia[st.session_state.historia["Typ"] == "PZ"]
@@ -667,7 +709,6 @@ elif menu == "Archiwum Dokumentów":
                 column_config={"Data":"Data przyjęcia", "Dokument":"Numer PZ", "Produkt/Surowiec":"Surowiec", "Ilosc":"Ilość", "Kontrahent":"Dostawca"}
             )
 
-    # 3. ARCHIWUM JUMBO (POBIERANIE PDF)
     with tab_arch_jmb:
         st.subheader("Rejestr Procesów Wytłaczania (Krok 1)")
         if not st.session_state.archiwum_jumbo_pdf:
@@ -688,7 +729,6 @@ elif menu == "Archiwum Dokumentów":
                 key="btn_dl_jmb"
             )
 
-    # 4. ARCHIWUM KONFEKCJI (POBIERANIE PDF)
     with tab_arch_knf:
         st.subheader("Rejestr Procesów Konfekcjonowania i Rozkroju (Krok 2)")
         if not st.session_state.archiwum_konf_pdf:
