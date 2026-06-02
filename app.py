@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V26)
+# 1. INICJALIZACJA BAZY (WERSJA V27)
 # ==========================================
-if 'init_v26' not in st.session_state:
-    st.session_state.init_v26 = True
+if 'init_v27' not in st.session_state:
+    st.session_state.init_v27 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -171,13 +171,11 @@ if menu == "Pulpit Główny":
     st.header("Pulpit Zarządzania: GrizoThermo+")
     st.write("Podsumowanie operacyjne i statystyki krytyczne przedsiębiorstwa.")
     
-    # Obliczenia do KPI
     suma_gotowych = int(st.session_state.produkty["Stan"].sum())
     stan_jumbo = int(st.session_state.polprodukty.loc[0, "Stan"])
     stan_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
     liczba_wz = len(st.session_state.archiwum_wz_pdf)
 
-    # Siatka wskaźników
     col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
     col_kpi1.metric("WYROBY GOTOWE (SUMA)", f"{suma_gotowych} szt.")
     col_kpi2.metric("ROLKI JUMBO NA STANIE", f"{stan_jumbo} szt.")
@@ -186,7 +184,6 @@ if menu == "Pulpit Główny":
     
     st.divider()
     
-    # Wykrywanie i alerty braków surowcowych
     braki_surowcowe = []
     for _, row_k in st.session_state.komponenty.iterrows():
         prog_alarmowy = st.session_state.receptura_baza.get(row_k['ID'], 0) * 20
@@ -199,13 +196,11 @@ if menu == "Pulpit Główny":
     else:
         st.success("Wszystkie surowce bazowe zabezpieczają minimum produkcyjne na 20 sztuk rolek Jumbo.")
 
-    # Układ dwukolumnowy dolny: Wykres i Ostatnie Ruchy
     st.write("")
     col_dash1, col_dash2 = st.columns([2, 3])
     
     with col_dash1:
         st.subheader("Porównanie Stanu Surowców")
-        # Generowanie prostego wykresu Streamlit dla surowców
         df_chart = st.session_state.komponenty[["Nazwa", "Stan"]].set_index("Nazwa")
         st.bar_chart(df_chart, y="Stan", color="#1e40af")
         
@@ -221,7 +216,7 @@ if menu == "Pulpit Główny":
             )
 
 # ==========================================
-# MODUŁ 2: STAN MAGAZYNU (WYDZIELONY)
+# MODUŁ 2: STAN MAGAZYNU
 # ==========================================
 elif menu == "Stan Magazynu":
     st.header("Ewidencja Stanów Magazynowych")
@@ -256,7 +251,7 @@ elif menu == "Stan Magazynu":
             st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {row["Stan"]:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
 # ==========================================
-# MODUŁ 3: PRODUKCJA (DWUETAPOWA Z RAPORTAMI PDF)
+# MODUŁ 3: PRODUKCJA
 # ==========================================
 elif menu == "Moduł Production":
     st.header("Zarządzanie Produkcją")
@@ -451,14 +446,74 @@ elif menu == "Moduł Production":
         else:
             st.warning("Brak rolek Jumbo na magazynie. Wyprodukuj je w Kroku 1.")
 
+# ==========================================
+# MODUŁ 4: BAZA KONTRAHENTÓW (NOWY CRM)
+# ==========================================
 elif menu == "Baza Kontrahentów (CRM)":
     st.header("Baza Kontrahentów")
-    zm = st.data_editor(st.session_state.kontrahenci, num_rows="dynamic", use_container_width=True, hide_index=True)
-    if st.button("Zapisz zmiany w Bazie Kontrahentów"):
-        st.session_state.kontrahenci = zm
-        st.success("Baza została zaktualizowana.")
-        st.rerun()
+    st.write("Zarządzanie relacjami z klientami oraz dostawcami surowców.")
+    
+    tab_odbiorcy, tab_dostawcy, tab_dodaj = st.tabs([
+        "Klienci (Odbiorcy WZ)", 
+        "Dostawcy (Przyjęcia PZ)", 
+        "Nowy Kontrahent"
+    ])
+    
+    with tab_odbiorcy:
+        df_odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]
+        if df_odbiorcy.empty:
+            st.info("Brak zarejestrowanych klientów w bazie danych.")
+        else:
+            for _, row in df_odbiorcy.iterrows():
+                st.markdown(f'''
+                <div class="item-card">
+                    <div class="card-title">{row["Nazwa"]}</div>
+                    <div class="card-details">NIP: {row["NIP"]} | Adres siedziby: {row["Adres"]}</div>
+                </div>
+                ''', unsafe_allow_html=True)
+                
+    with tab_dostawcy:
+        df_dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]
+        if df_dostawcy.empty:
+            st.info("Brak zarejestrowanych dostawców w bazie danych.")
+        else:
+            for _, row in df_dostawcy.iterrows():
+                st.markdown(f'''
+                <div class="item-card item-card-purple">
+                    <div class="card-title">{row["Nazwa"]}</div>
+                    <div class="card-details">NIP: {row["NIP"]} | Adres dystrybucji: {row["Adres"]}</div>
+                </div>
+                ''', unsafe_allow_html=True)
 
+    with tab_dodaj:
+        st.subheader("Formularz rejestracji nowego podmiotu")
+        with st.form("nowy_kontrahent_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                nowa_nazwa = st.text_input("Pełna nazwa firmy (Wymagane)")
+                nowy_nip = st.text_input("Numer identyfikacji podatkowej (NIP)")
+            with col2:
+                nowy_typ = st.selectbox("Typ operacyjny podmiotu", ["Odbiorca", "Dostawca"])
+                nowy_adres = st.text_input("Adres rejestracyjny (Wymagane)")
+            
+            st.write("")
+            if st.form_submit_button("Zarejestruj podmiot w systemie"):
+                if nowa_nazwa.strip() and nowy_adres.strip():
+                    nowy_wpis = pd.DataFrame([{
+                        "Nazwa": nowa_nazwa.strip(),
+                        "NIP": nowy_nip.strip(),
+                        "Adres": nowy_adres.strip(),
+                        "Typ": nowy_typ
+                    }])
+                    st.session_state.kontrahenci = pd.concat([st.session_state.kontrahenci, nowy_wpis], ignore_index=True)
+                    st.success(f"Podmiot {nowa_nazwa} został pomyślnie zapisany w bazie CRM.")
+                    st.rerun()
+                else:
+                    st.error("Odrzucono. Pola Nazwa firmy oraz Adres rejestracyjny są obowiązkowe.")
+
+# ==========================================
+# MODUŁ 5: PRZYJĘCIE TOWARU (PZ)
+# ==========================================
 elif menu == "Przyjęcie Towaru (PZ)":
     st.header("Przyjęcie Zewnętrzne (PZ)")
     dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]["Nazwa"].tolist()
@@ -477,6 +532,9 @@ elif menu == "Przyjęcie Towaru (PZ)":
                 st.success("Zapisano przyjęcie zewnętrzne.")
                 st.rerun()
 
+# ==========================================
+# MODUŁ 6: WYDANIE TOWARU (WZ)
+# ==========================================
 elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
@@ -665,7 +723,7 @@ elif menu == "Wydanie Towaru (WZ)":
                         st.rerun()
 
 # ==========================================
-# ARCHIWUM DOKUMENTÓW (Z PEŁNYMI PLIKAMI PDF)
+# MODUŁ 7: ARCHIWUM DOKUMENTÓW 
 # ==========================================
 elif menu == "Archiwum Dokumentów":
     st.header("Archiwum Dokumentów Operacyjnych i Technologicznych")
@@ -749,6 +807,9 @@ elif menu == "Archiwum Dokumentów":
                 key="btn_dl_knf"
             )
 
+# ==========================================
+# MODUŁ 8: PANEL ADMINA
+# ==========================================
 elif menu == "Panel Administracyjny":
     st.header("Narzędzia Administracyjne")
     tab_uzytkownicy, tab_korekt_surowce, tab_korekt_prod = st.tabs(["Konta Użytkowników", "Korekta Surowców", "Korekta Wyrobów Gotowych"])
@@ -777,6 +838,7 @@ elif menu == "Panel Administracyjny":
                 else: st.error("Wszystkie pola formularza są wymagane.")
 
     with tab_korekt_surowce:
+        st.info("UWAGA: Tylko dla celów inwentaryzacyjnych. Zmiany nadpisują obecne stany fizyczne w bazie bez generowania PDF.")
         zm_k = st.data_editor(st.session_state.komponenty, hide_index=True, use_container_width=True)
         if st.button("Zapisz korektę surowców"):
             st.session_state.komponenty = zm_k
@@ -784,6 +846,7 @@ elif menu == "Panel Administracyjny":
             st.rerun()
 
     with tab_korekt_prod:
+        st.info("UWAGA: Zmiany stacji konfekcji mogą wpłynąć na rozliczenia magazynowe.")
         zm_p = st.data_editor(st.session_state.produkty, hide_index=True, use_container_width=True)
         if st.button("Zapisz korektę produktów gotowych"):
             st.session_state.produkty = zm_p
