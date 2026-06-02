@@ -24,8 +24,8 @@ def pobierz_czcionki():
 # ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
 # ==========================================
-if 'init_v7' not in st.session_state:
-    st.session_state.init_v7 = True
+if 'init_v8' not in st.session_state:
+    st.session_state.init_v8 = True
     
     st.session_state.wz_counter = 1
     
@@ -33,13 +33,17 @@ if 'init_v7' not in st.session_state:
         "admin": {
             "haslo": "admin123", 
             "imie": "Kierownik Magazynu",
-            "uprawnienia": {
-                "produkcja": True,
-                "magazyn": True,
-                "admin": True
-            }
+            "uprawnienia": {"produkcja": True, "magazyn": True, "admin": True}
         }
     }
+    
+    # NOWA BAZA: KONTRAHENCI
+    st.session_state.kontrahenci = pd.DataFrame([
+        {"Nazwa": "Hurtownia Surowców ALUSTAR", "NIP": "1112223344", "Adres": "ul. Hutnicza 10, 40-001 Katowice", "Typ": "Dostawca"},
+        {"Nazwa": "Chemia Przemysłowa Sp. z o.o.", "NIP": "9998887766", "Adres": "ul. Barwna 5, 01-234 Warszawa", "Typ": "Dostawca"},
+        {"Nazwa": "Bud-Max Materiały Budowlane", "NIP": "5554443322", "Adres": "ul. Wrocławska 100, 30-001 Kraków", "Typ": "Odbiorca"},
+        {"Nazwa": "Izolacje Kowalski s.c.", "NIP": "1231231212", "Adres": "ul. Długa 12/4, 80-002 Gdańsk", "Typ": "Odbiorca"}
+    ])
     
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
@@ -62,13 +66,13 @@ if 'init_v7' not in st.session_state:
     ])
     
     st.session_state.historia = pd.DataFrame(columns=[
-        "Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik"
+        "Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"
     ])
 
 # ==========================================
 # FUNKCJE POMOCNICZE
 # ==========================================
-def dodaj_ruch(typ, dokument, nazwa, ilosc):
+def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     uzytkownik = st.session_state.aktualny_uzytkownik if st.session_state.aktualny_uzytkownik else "System"
     nowy_ruch = pd.DataFrame([{
         "Data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -76,7 +80,8 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc):
         "Dokument": dokument,
         "Produkt/Surowiec": nazwa,
         "Ilosc": ilosc,
-        "Użytkownik": uzytkownik
+        "Użytkownik": uzytkownik,
+        "Kontrahent": kontrahent
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
@@ -197,7 +202,15 @@ if menu == "Pulpit Główny":
         df_k["Status"] = df_k.apply(lambda row: "Niski stan" if row["Stan"] <= row["Min_Stan"] else "W normie", axis=1)
         st.dataframe(df_k.style.map(koloruj_status, subset=['Status']), use_container_width=True, hide_index=True)
     with tab_hist:
-        st.dataframe(st.session_state.historia.sort_values(by="Data", ascending=False), use_container_width=True, hide_index=True)
+        st.dataframe(
+            st.session_state.historia.sort_values(by="Data", ascending=False), 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "Data": st.column_config.DatetimeColumn("Data", format="YYYY-MM-DD HH:mm"),
+                "Kontrahent": st.column_config.TextColumn("Dostawca/Odbiorca")
+            }
+        )
 
 # ------------------------------------------
 # ZAKŁADKA 2: PRODUKCJA 
@@ -233,19 +246,19 @@ elif menu == "Moduł Produkcji":
             if st.form_submit_button("Zatwierdź i zaksięguj produkcję", disabled=(max_rolek == 0)):
                 idx_prod = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == wybrany_wariant][0]
                 st.session_state.produkty.at[idx_prod, "Stan"] += ile_produkujemy
-                dodaj_ruch("PW", "Zlecenie Prod.", wybrany_wariant, ile_produkujemy)
+                dodaj_ruch("PW", "Zlecenie Prod.", wybrany_wariant, ile_produkujemy, "Produkcja Własna")
                 
                 receptura = st.session_state.receptury[st.session_state.receptury["Wariant"] == wybrany_wariant]
                 for _, wiersz in receptura.iterrows():
                     idx_komp = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == wiersz["ID_Komp"]][0]
                     st.session_state.komponenty.at[idx_komp, "Stan"] -= (wiersz["Ilosc"] * ile_produkujemy)
-                    dodaj_ruch("RW", "Zlecenie Prod.", st.session_state.komponenty.at[idx_komp, "Nazwa"], (wiersz["Ilosc"] * ile_produkujemy))
+                    dodaj_ruch("RW", "Zlecenie Prod.", st.session_state.komponenty.at[idx_komp, "Nazwa"], (wiersz["Ilosc"] * ile_produkujemy), "Produkcja Własna")
                 
                 st.success(f"Proces zakończony. Zaksięgowano wyprodukowanie {ile_produkujemy} szt.")
                 st.rerun()
 
 # ------------------------------------------
-# ZAKŁADKA 3: OPERACJE MAGAZYNOWE (GENERATOR PDF)
+# ZAKŁADKA 3: OPERACJE MAGAZYNOWE Z BAZĄ KONTRAHENTÓW
 # ------------------------------------------
 elif menu == "Operacje Magazynowe (PZ/WZ)":
     st.header("Zarządzanie Zapasami (PZ/WZ)")
@@ -254,24 +267,34 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
     
     with tab_pz:
         st.subheader("Rejestracja nowej dostawy surowców")
-        with st.form("pz_form"):
-            nr_doc = st.text_input("Numer dokumentu (np. nr faktury, WZ dostawcy)")
-            wybrany_komp = st.selectbox("Wybierz przyjmowany surowiec", st.session_state.komponenty["Nazwa"].tolist())
-            ilosc = st.number_input("Ilość przyjmowana (zgodnie z jm.)", min_value=0.1, value=100.0)
-            
-            if st.form_submit_button("Zatwierdź dokument PZ"):
-                idx = st.session_state.komponenty.index[st.session_state.komponenty["Nazwa"] == wybrany_komp][0]
-                st.session_state.komponenty.at[idx, "Stan"] += ilosc
-                dodaj_ruch("PZ", nr_doc, wybrany_komp, ilosc)
-                st.success("Dokument PZ został pomyślnie zapisany w systemie.")
-                st.rerun()
+        
+        # Pobieranie listy dostawców z bazy
+        dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]["Nazwa"].tolist()
+        
+        if not dostawcy:
+            st.warning("Brak dostawców w bazie! Dodaj ich w Panelu Administracyjnym.")
+        else:
+            with st.form("pz_form"):
+                nr_doc = st.text_input("Numer dokumentu (np. nr faktury, WZ dostawcy)")
+                wybrany_dostawca = st.selectbox("Dostawca", dostawcy)
+                wybrany_komp = st.selectbox("Wybierz przyjmowany surowiec", st.session_state.komponenty["Nazwa"].tolist())
+                ilosc = st.number_input("Ilość przyjmowana (zgodnie z jm.)", min_value=0.1, value=100.0)
+                
+                if st.form_submit_button("Zatwierdź dokument PZ"):
+                    idx = st.session_state.komponenty.index[st.session_state.komponenty["Nazwa"] == wybrany_komp][0]
+                    st.session_state.komponenty.at[idx, "Stan"] += ilosc
+                    dodaj_ruch("PZ", nr_doc, wybrany_komp, ilosc, wybrany_dostawca)
+                    st.success("Dokument PZ został pomyślnie zapisany w systemie.")
+                    st.rerun()
 
     with tab_wz:
-        st.subheader("Wydanie produktów do klienta i Generator WZ (PDF)")
+        st.subheader("Wydanie produktów do klienta (Generator PDF)")
+        
+        # Pobieranie listy odbiorców z bazy
+        odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
         
         if "wygenerowane_pdf" in st.session_state:
             st.success(f"Transakcja zaksięgowana. Dokument {st.session_state.nazwa_pliku_wz} jest gotowy do pobrania.")
-            
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 st.download_button(
@@ -287,17 +310,19 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                     del st.session_state.nazwa_pliku_wz
                     st.rerun()
                     
+        elif not odbiorcy:
+            st.warning("Brak odbiorców w bazie! Dodaj ich w Panelu Administracyjnym.")
         else:
             data_dzis_str = datetime.now().strftime("%Y/%m/%d")
             nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
             
+            # Wprowadzanie danych ze zintegrowaną bazą
             with st.form("wz_form"):
                 col_f1, col_f2 = st.columns(2)
                 with col_f1:
-                    nr_doc_wz = st.text_input("Numer dokumentu (Generowany automatycznie)", value=nr_wz_auto, disabled=True)
-                    klient_nazwa = st.text_input("Nabywca (Nazwa firmy)")
-                    klient_adres = st.text_area("Adres Nabywcy (ulica, kod, miasto)", height=68)
-                    klient_nip = st.text_input("NIP Nabywcy")
+                    nr_doc_wz = st.text_input("Numer dokumentu (Auto)", value=nr_wz_auto, disabled=True)
+                    wybrany_klient = st.selectbox("Nabywca (Wybierz z bazy)", odbiorcy)
+                    
                 with col_f2:
                     wybrany_prod = st.selectbox("Wybierz asortyment", st.session_state.produkty["Wariant"].tolist())
                     stan_obecny = st.session_state.produkty[st.session_state.produkty["Wariant"] == wybrany_prod]["Stan"].values[0]
@@ -306,17 +331,19 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                     uwagi_doc = st.text_input("Uwagi do dokumentu", value="Dostawa z magazynu głównego.")
 
                 if st.form_submit_button("Zatwierdź i Wystaw PDF"):
-                    if not klient_nazwa.strip() or not klient_adres.strip():
-                        st.error("Pola 'Nabywca' oraz 'Adres' są obowiązkowe!")
-                    elif ilosc_wz <= stan_obecny:
+                    if ilosc_wz <= stan_obecny:
+                        # Pobieranie danych klienta do PDF
+                        dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
+                        klient_adres = dane_klienta["Adres"]
+                        klient_nip = dane_klienta["NIP"]
                         
+                        # Aktualizacja bazy produktów
                         idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == wybrany_prod][0]
                         st.session_state.produkty.at[idx, "Stan"] -= ilosc_wz
-                        dodaj_ruch("WZ", nr_doc_wz, wybrany_prod, ilosc_wz)
-                        
+                        dodaj_ruch("WZ", nr_doc_wz, wybrany_prod, ilosc_wz, wybrany_klient)
                         st.session_state.wz_counter += 1
                         
-                        # INICJALIZACJA I BUDOWA PDF DOKŁADNIE WEDŁUG WZORU ILOŚCIOWEGO
+                        # INICJALIZACJA I BUDOWA PDF
                         font_path, font_bold_path = pobierz_czcionki()
                         wystawiono_miejscowosc = "Katowice"
                         
@@ -325,7 +352,7 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         pdf.add_font("Roboto", "", font_path)
                         pdf.add_font("Roboto", "B", font_bold_path)
                         
-                        # 1. Nagłówek (Góra strony)
+                        # Nagłówek
                         pdf.set_font("Roboto", "", 9)
                         data_aktualna = datetime.now().strftime("%Y-%m-%d")
                         pdf.cell(95, 5, f"Wystawiono dnia: {data_aktualna}, {wystawiono_miejscowosc}", border=0, ln=0)
@@ -334,48 +361,32 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         pdf.cell(95, 5, f"Wydanie Zewnętrzne nr {nr_doc_wz}", border=0, ln=1, align='R')
                         pdf.ln(12)
                         
-                        # 2. Dane stron (Układ dwukolumnowy)
+                        # Dwukolumnowy układ adresów
                         y_blok_stron = pdf.get_y()
                         
-                        # Lewa kolumna: Sprzedawca
                         pdf.set_font("Roboto", "B", 10)
                         pdf.cell(95, 5, "Sprzedawca:", border=0, ln=1)
                         pdf.set_font("Roboto", "", 9)
                         pdf.multi_cell(95, 5, "GrizoThermo Sp. z o.o.\nul. Fabryczna 14A\n44-100 Katowice\nNIP: 1234567890\nbiuro@grizothermo.pl")
                         y_koniec_sprzedawcy = pdf.get_y()
                         
-                        # Prawa kolumna: Nabywca & Odbiorca
                         pdf.set_xy(110, y_blok_stron)
                         pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(95, 5, "Nabywca:", border=0, ln=1)
+                        pdf.cell(95, 5, "Nabywca / Odbiorca:", border=0, ln=1)
                         pdf.set_font("Roboto", "", 9)
                         pdf.set_x(110)
                         
-                        adres_czysty = klient_adres.strip()
-                        nip_czysty = f"NIP: {klient_nip.strip()}" if klient_nip.strip() else ""
-                        pdf.multi_cell(95, 5, f"{klient_nazwa.strip()}\n{adres_czysty}\n{nip_czysty}")
+                        nip_czysty = f"NIP: {klient_nip}" if klient_nip else ""
+                        pdf.multi_cell(95, 5, f"{wybrany_klient}\n{klient_adres}\n{nip_czysty}")
                         
-                        pdf.ln(3)
-                        pdf.set_x(110)
-                        pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(95, 5, "Odbiorca:", border=0, ln=1)
-                        pdf.set_font("Roboto", "", 9)
-                        pdf.set_x(110)
-                        pdf.multi_cell(95, 5, f"{klient_nazwa.strip()}\n{adres_czysty}")
-                        
-                        # Wyznaczanie bezpiecznego punktu Y dla tabeli
                         najnizszy_y = max(y_koniec_sprzedawcy, pdf.get_y()) + 12
                         pdf.set_y(najnizszy_y)
                         
-                        # 3. Sekcja tabeli głównej (POZYCJE - TYLKO ILOŚCIOWE)
+                        # Tabela z pozycjami
                         pdf.set_font("Roboto", "B", 10)
                         pdf.cell(190, 6, "POZYCJE", border=0, ln=1)
                         
-                        # Szerokości kolumn (Suma = 190)
-                        w_lp = 15
-                        w_nazwa = 115
-                        w_ilosc = 30
-                        w_jm = 30
+                        w_lp = 15; w_nazwa = 115; w_ilosc = 30; w_jm = 30
                         
                         pdf.set_font("Roboto", "B", 9)
                         pdf.cell(w_lp, 8, "LP", border=1, align='C')
@@ -383,7 +394,6 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         pdf.cell(w_ilosc, 8, "Ilość", border=1, align='C')
                         pdf.cell(w_jm, 8, "Jm.", border=1, align='C', ln=1)
                         
-                        # Wiersz z produktem
                         pdf.set_font("Roboto", "", 9)
                         pdf.cell(w_lp, 8, "1", border=1, align='C')
                         pdf.cell(w_nazwa, 8, wybrany_prod, border=1, align='L')
@@ -391,14 +401,13 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         pdf.cell(w_jm, 8, "szt.", border=1, align='C', ln=1)
                         pdf.ln(8)
                         
-                        # Uwagi
                         if uwagi_doc.strip():
                             pdf.set_font("Roboto", "B", 9)
                             pdf.cell(15, 5, "Uwagi:", border=0, ln=0)
                             pdf.set_font("Roboto", "", 9)
                             pdf.cell(0, 5, uwagi_doc.strip(), border=0, ln=1)
                         
-                        # 4. Podpisy (Dół strony)
+                        # Podpisy
                         pdf.ln(25)
                         pdf.set_font("Roboto", "", 8.5)
                         pdf.cell(95, 5, "......................................................................", border=0, align='C', ln=0)
@@ -408,9 +417,9 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         
                         pdf_bytes = bytes(pdf.output())
                         st.session_state.wygenerowane_pdf = pdf_bytes
-                        
                         safe_name = nr_doc_wz.replace('/', '_')
                         st.session_state.nazwa_pliku_wz = f"{safe_name}.pdf"
+                        
                         st.rerun()
                     else:
                         st.error("Odrzucono: Niewystarczająca ilość asortymentu na magazynie.")
@@ -421,12 +430,40 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
 elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.get("admin", False):
     st.header("Narzędzia Administracyjne")
     
-    tab_uzytkownicy, tab_korekt_surowce, tab_korekt_prod = st.tabs([
-        "Konta Użytkowników", "Korekta Surowców", "Korekta Wyrobów Gotowych"
+    tab_kontrah, tab_uzytkownicy, tab_korekt_surowce, tab_korekt_prod = st.tabs([
+        "Baza Kontrahentów", "Konta Użytkowników", "Korekta Surowców", "Korekta Wyrobów Gotowych"
     ])
     
+    # --- NOWA ZAKŁADKA CRM (KONTRAHENCI) ---
+    with tab_kontrah:
+        st.subheader("Zarządzanie Bazą Firm (Dostawcy i Odbiorcy)")
+        st.info("💡 **Aby dodać nową firmę**, przewiń na sam dół tabeli i kliknij w pusty wiersz. Możesz też usuwać firmy zaznaczając je z lewej strony.")
+        
+        zmienieni_kontrahenci = st.data_editor(
+            st.session_state.kontrahenci,
+            key="edit_kontrahenci",
+            num_rows="dynamic",  # Pozwala na swobodne dodawanie i usuwanie rzędów!
+            use_container_width=True,
+            column_config={
+                "Nazwa": st.column_config.TextColumn("Nazwa Firmy", required=True),
+                "NIP": st.column_config.TextColumn("Numer NIP", required=False),
+                "Adres": st.column_config.TextColumn("Pełny Adres", required=True),
+                "Typ": st.column_config.SelectboxColumn(
+                    "Typ firmy",
+                    help="Czy to firma od której kupujesz (Dostawca) czy taka, której sprzedajesz (Odbiorca)?",
+                    options=["Dostawca", "Odbiorca"],
+                    required=True
+                )
+            }
+        )
+        
+        if st.button("Zapisz zmiany w Bazie Kontrahentów"):
+            st.session_state.kontrahenci = zmienieni_kontrahenci
+            st.success("Zaktualizowano bazę firm!")
+            st.rerun()
+    
     with tab_uzytkownicy:
-        st.subheader("Zarządzanie Dostępem i Uprawnieniami")
+        st.subheader("Zarządzanie Dostępem")
         lista_uzytkownikow = []
         for l, dane in st.session_state.uzytkownicy.items():
             lista_uzytkownikow.append({
@@ -463,11 +500,7 @@ elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.g
                     st.session_state.uzytkownicy[nowy_login] = {
                         "haslo": nowe_haslo,
                         "imie": nowe_imie,
-                        "uprawnienia": {
-                            "produkcja": upr_produkcja,
-                            "magazyn": upr_magazyn,
-                            "admin": upr_admin
-                        }
+                        "uprawnienia": {"produkcja": upr_produkcja, "magazyn": upr_magazyn, "admin": upr_admin}
                     }
                     st.success(f"Pomyślnie utworzono nowe konto dla: {nowe_imie}!")
                     st.rerun()
