@@ -11,7 +11,6 @@ st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
 # ==========================================
 # DANE TWOJEJ FIRMY (WYSTAWCY DOKUMENTÓW WZ)
 # ==========================================
-# Wpisz tutaj prawdziwe dane swojej firmy. Będą one zawsze na stałe na każdym dokumencie WZ.
 MOJA_FIRMA = {
     "nazwa": "GrizoThermo Sp. z o.o.",
     "adres": "ul. Fabryczna 14A\n44-100 Katowice",
@@ -36,8 +35,8 @@ def pobierz_czcionki():
 # ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
 # ==========================================
-if 'init_v10' not in st.session_state:
-    st.session_state.init_v10 = True
+if 'init_v11' not in st.session_state:
+    st.session_state.init_v11 = True
     
     st.session_state.wz_counter = 1
     
@@ -287,7 +286,6 @@ elif menu == "Baza Kontrahentów (CRM)":
             "Adres": st.column_config.TextColumn("Pełny Adres", required=True),
             "Typ": st.column_config.SelectboxColumn(
                 "Typ firmy",
-                help="Czy to firma od której kupujesz (Dostawca) czy taka, której sprzedajesz (Odbiorca)?",
                 options=["Dostawca", "Odbiorca"],
                 required=True
             )
@@ -300,7 +298,7 @@ elif menu == "Baza Kontrahentów (CRM)":
         st.rerun()
 
 # ------------------------------------------
-# ZAKŁADKA 4: OPERACJE MAGAZYNOWE (PZ / WZ)
+# ZAKŁADKA 4: OPERACJE MAGAZYNOWE (PZ / WZ - GENERATOR)
 # ------------------------------------------
 elif menu == "Operacje Magazynowe (PZ/WZ)":
     st.header("Zarządzanie Zapasami (PZ/WZ)")
@@ -336,14 +334,14 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 st.download_button(
-                    label="Pobierz oficjalny dokument WZ (.pdf)",
+                    label="📄 Pobierz oficjalny dokument WZ (.pdf)",
                     data=st.session_state.wygenerowane_pdf,
                     file_name=st.session_state.nazwa_pliku_wz,
                     mime="application/pdf",
                     use_container_width=True
                 )
             with col_btn2:
-                if st.button("Wyczyść formularz i wystaw kolejny dokument", use_container_width=True):
+                if st.button("⬅️ Wyczyść formularz i wystaw kolejny dokument", use_container_width=True):
                     del st.session_state.wygenerowane_pdf
                     del st.session_state.nazwa_pliku_wz
                     st.rerun()
@@ -385,70 +383,90 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         pdf.add_font("Roboto", "", font_path)
                         pdf.add_font("Roboto", "B", font_bold_path)
                         
+                        # --- ELEGANCKI NAGŁÓWEK ---
+                        pdf.set_fill_color(240, 240, 240) # Jasnoszare tło tytułu
+                        pdf.set_font("Roboto", "B", 15)
+                        pdf.cell(0, 12, f"WYDANIE ZEWNĘTRZNE (WZ) NR {nr_doc_wz}", border=0, ln=1, align='C', fill=True)
+                        
+                        # Data i miejsce pod tytułem
                         pdf.set_font("Roboto", "", 9)
+                        pdf.set_text_color(100, 100, 100) # Szary tekst
                         data_aktualna = datetime.now().strftime("%Y-%m-%d")
-                        
-                        # Użycie zmiennych z konfiguracji MOJA_FIRMA
-                        pdf.cell(95, 5, f"Wystawiono dnia: {data_aktualna}, {MOJA_FIRMA['miejscowosc_wystawienia']}", border=0, ln=0)
-                        
-                        pdf.set_font("Roboto", "B", 13)
-                        pdf.cell(95, 5, f"Wydanie Zewnętrzne nr {nr_doc_wz}", border=0, ln=1, align='R')
-                        pdf.ln(12)
-                        
-                        y_blok_stron = pdf.get_y()
-                        
-                        # Lewa kolumna - Dynamicznie wczytywana Twoja firma
-                        pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(95, 5, "Sprzedawca:", border=0, ln=1)
-                        pdf.set_font("Roboto", "", 9)
-                        firma_tekst = f"{MOJA_FIRMA['nazwa']}\n{MOJA_FIRMA['adres']}\n{MOJA_FIRMA['nip']}\n{MOJA_FIRMA['kontakt']}"
-                        pdf.multi_cell(95, 5, firma_tekst)
-                        y_koniec_sprzedawcy = pdf.get_y()
-                        
-                        # Prawa kolumna - Odbiorca
-                        pdf.set_xy(110, y_blok_stron)
-                        pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(95, 5, "Nabywca / Odbiorca:", border=0, ln=1)
-                        pdf.set_font("Roboto", "", 9)
-                        pdf.set_x(110)
-                        
-                        nip_czysty = f"NIP: {klient_nip}" if pd.notna(klient_nip) and str(klient_nip).strip() else ""
-                        pdf.multi_cell(95, 5, f"{wybrany_klient}\n{klient_adres}\n{nip_czysty}")
-                        
-                        najnizszy_y = max(y_koniec_sprzedawcy, pdf.get_y()) + 12
-                        pdf.set_y(najnizszy_y)
-                        
-                        pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(190, 6, "POZYCJE", border=0, ln=1)
-                        
-                        w_lp = 15; w_nazwa = 115; w_ilosc = 30; w_jm = 30
-                        
-                        pdf.set_font("Roboto", "B", 9)
-                        pdf.cell(w_lp, 8, "LP", border=1, align='C')
-                        pdf.cell(w_nazwa, 8, "Nazwa asortymentu", border=1, align='L')
-                        pdf.cell(w_ilosc, 8, "Ilość", border=1, align='C')
-                        pdf.cell(w_jm, 8, "Jm.", border=1, align='C', ln=1)
-                        
-                        pdf.set_font("Roboto", "", 9)
-                        pdf.cell(w_lp, 8, "1", border=1, align='C')
-                        pdf.cell(w_nazwa, 8, wybrany_prod, border=1, align='L')
-                        pdf.cell(w_ilosc, 8, str(ilosc_wz), border=1, align='C')
-                        pdf.cell(w_jm, 8, "szt.", border=1, align='C', ln=1)
+                        pdf.cell(0, 6, f"Data wydania: {data_aktualna}   |   Miejsce wystawienia: {MOJA_FIRMA['miejscowosc_wystawienia']}", border=0, ln=1, align='R')
+                        pdf.set_text_color(0, 0, 0) # Powrót do czarnego
                         pdf.ln(8)
                         
+                        # --- DANE KONTRAHENTÓW (IDEALNIE WYRÓWNANE KOLUMNY) ---
+                        y_start = pdf.get_y()
+                        
+                        # Lewa kolumna - Sprzedawca
+                        pdf.set_fill_color(248, 248, 248) # Bardzo jasny szary dla bloków
+                        pdf.set_font("Roboto", "B", 10)
+                        pdf.cell(90, 7, "  SPRZEDAWCA / WYSTAWCA", border=0, ln=1, fill=True)
+                        pdf.set_font("Roboto", "", 9)
+                        firma_tekst = f"{MOJA_FIRMA['nazwa']}\n{MOJA_FIRMA['adres']}\n{MOJA_FIRMA['nip']}\n{MOJA_FIRMA['kontakt']}"
+                        pdf.multi_cell(90, 5, firma_tekst, border=0)
+                        y_left = pdf.get_y()
+                        
+                        # Prawa kolumna - Nabywca
+                        pdf.set_xy(105, y_start)
+                        pdf.set_font("Roboto", "B", 10)
+                        pdf.cell(90, 7, "  NABYWCA / ODBIORCA", border=0, ln=1, fill=True)
+                        pdf.set_xy(105, y_start + 7)
+                        pdf.set_font("Roboto", "", 9)
+                        nip_czysty = f"NIP: {klient_nip}" if pd.notna(klient_nip) and str(klient_nip).strip() else ""
+                        pdf.multi_cell(90, 5, f"{wybrany_klient}\n{klient_adres}\n{nip_czysty}", border=0)
+                        y_right = pdf.get_y()
+                        
+                        # Ustawienie kursora pod dłuższą kolumną
+                        pdf.set_y(max(y_left, y_right) + 12)
+                        
+                        # --- TABELA ASORTYMENTU ---
+                        pdf.set_font("Roboto", "B", 10)
+                        pdf.cell(0, 8, "POZYCJE DOKUMENTU", border="B", ln=1) # Linia pod tytułem sekcji
+                        pdf.ln(3)
+                        
+                        # Nagłówek tabeli z eleganckim tłem
+                        pdf.set_fill_color(230, 235, 245) # Lekki niebieskawo-szary
+                        pdf.set_font("Roboto", "B", 9)
+                        pdf.cell(15, 8, "Lp.", border=1, align='C', fill=True)
+                        pdf.cell(115, 8, "Nazwa asortymentu", border=1, align='L', fill=True)
+                        pdf.cell(30, 8, "Ilość", border=1, align='C', fill=True)
+                        pdf.cell(30, 8, "Jm.", border=1, align='C', ln=1, fill=True)
+                        
+                        # Wiersz tabeli
+                        pdf.set_font("Roboto", "", 9)
+                        pdf.cell(15, 8, "1", border=1, align='C')
+                        pdf.cell(115, 8, wybrany_prod, border=1, align='L')
+                        pdf.cell(30, 8, str(ilosc_wz), border=1, align='C')
+                        pdf.cell(30, 8, "szt.", border=1, align='C', ln=1)
+                        
+                        # --- UWAGI ---
+                        pdf.ln(10)
                         if uwagi_doc.strip():
                             pdf.set_font("Roboto", "B", 9)
-                            pdf.cell(15, 5, "Uwagi:", border=0, ln=0)
+                            pdf.cell(15, 5, "Uwagi:", border=0)
                             pdf.set_font("Roboto", "", 9)
-                            pdf.cell(0, 5, uwagi_doc.strip(), border=0, ln=1)
+                            pdf.multi_cell(0, 5, uwagi_doc.strip(), border=0)
                         
+                        # --- PODPISY (IDEALNIE WYŚRODKOWANE) ---
                         pdf.ln(25)
-                        pdf.set_font("Roboto", "", 8.5)
-                        pdf.cell(95, 5, "......................................................................", border=0, align='C', ln=0)
-                        pdf.cell(95, 5, "......................................................................", border=0, align='C', ln=1)
-                        pdf.cell(95, 4, "Odebrał", border=0, align='C', ln=0)
-                        pdf.cell(95, 4, f"Wystawił: {st.session_state.aktualny_uzytkownik}", border=0, align='C', ln=1)
+                        y_sig = pdf.get_y()
                         
+                        # Lewy podpis
+                        pdf.set_font("Roboto", "", 8.5)
+                        pdf.set_xy(15, y_sig)
+                        pdf.cell(60, 5, "..........................................................", align='C', ln=1)
+                        pdf.set_x(15)
+                        pdf.cell(60, 5, f"Wystawił: {st.session_state.aktualny_uzytkownik}", align='C')
+                        
+                        # Prawy podpis
+                        pdf.set_xy(135, y_sig)
+                        pdf.cell(60, 5, "..........................................................", align='C', ln=1)
+                        pdf.set_x(135)
+                        pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
+                        
+                        # Finalizacja PDF
                         pdf_bytes = bytes(pdf.output())
                         st.session_state.wygenerowane_pdf = pdf_bytes
                         safe_name = nr_doc_wz.replace('/', '_')
