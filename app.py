@@ -8,8 +8,8 @@ st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
 # ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
 # ==========================================
-if 'init' not in st.session_state:
-    st.session_state.init = True
+if 'init_v2' not in st.session_state:
+    st.session_state.init_v2 = True
     
     # Baza użytkowników (System Granularnych Uprawnień)
     st.session_state.uzytkownicy = {
