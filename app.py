@@ -39,8 +39,8 @@ def pobierz_czcionki():
 # ==========================================
 # 1. INICJALIZACJA BAZY 
 # ==========================================
-if 'init_v19' not in st.session_state:
-    st.session_state.init_v19 = True
+if 'init_v20' not in st.session_state:
+    st.session_state.init_v20 = True
     st.session_state.wz_counter = 1
     
     st.session_state.uzytkownicy = {
@@ -61,10 +61,11 @@ if 'init_v19' not in st.session_state:
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
     
+    # Surowce bazowe
     st.session_state.komponenty = pd.DataFrame([
-        {"ID": "K01", "Nazwa": "Aluminium zbrojone 1,15m", "Stan": 3200.0, "Jednostka": "mb", "Min_Stan": 1000.0},
-        {"ID": "K02", "Nazwa": "Barwnik biały", "Stan": 15.0, "Jednostka": "kg", "Min_Stan": 5.0},
-        {"ID": "K03", "Nazwa": "Barwnik zielony", "Stan": 12.0, "Jednostka": "kg", "Min_Stan": 3.0}
+        {"ID": "K01", "Nazwa": "Aluminium zbrojone 1,15m", "Stan": 3200.0, "Jednostka": "mb"},
+        {"ID": "K02", "Nazwa": "Barwnik biały", "Stan": 15.0, "Jednostka": "kg"},
+        {"ID": "K03", "Nazwa": "Barwnik zielony", "Stan": 12.0, "Jednostka": "kg"}
     ])
     
     st.session_state.polprodukty = pd.DataFrame([
@@ -101,7 +102,7 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-# Profesjonalny, oczyszczony styl CSS dla kafelków
+# Minimalistyczny, oczyszczony styl CSS
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
@@ -167,6 +168,21 @@ if menu == "Pulpit Główny":
     colB.metric("MATERIAŁ DO KONFEKCJI (ROLKA JUMBO)", f"{int(st.session_state.polprodukty.loc[0, 'Stan'])} szt.")
     
     st.divider()
+    
+    # ----------------------------------------------------
+    # SYSTEM SZYBKIEGO OSTRZEGANIA - MONITOROWANIE 20 ROLEK
+    # ----------------------------------------------------
+    braki_surowcowe = []
+    for _, row_k in st.session_state.komponenty.iterrows():
+        prog_alarmowy = st.session_state.receptura_baza.get(row_k['ID'], 0) * 20
+        if row_k['Stan'] < prog_alarmowy:
+            niedobor = prog_alarmowy - row_k['Stan']
+            braki_surowcowe.append(f"{row_k['Nazwa']} (Aktualnie: {row_k['Stan']:g} {row_k['Jednostka']}, Brakuje: {niedobor:g} {row_k['Jednostka']})")
+            
+    if braki_surowcowe:
+        st.error("**KOMUNIKAT SYSTEMOWY: Krytyczny stan surowców**\n\nZapas następujących materiałów uniemożliwia wyprodukowanie partii 20 rolek Jumbo:\n\n" + "\n".join([f"* {b}" for b in braki_surowcowe]))
+        st.write("")
+
     tab_prod, tab_polprod, tab_komp, tab_hist = st.tabs(["Wyroby Gotowe", "Półprodukty", "Surowce", "Historia Operacji"])
     
     with tab_prod:
@@ -181,8 +197,11 @@ if menu == "Pulpit Główny":
 
     with tab_komp:
         for _, row in st.session_state.komponenty.iterrows():
-            alert = "item-card-alert" if row['Stan'] <= row['Min_Stan'] else "item-card-ok"
-            status_txt = "Niski stan" if row['Stan'] <= row['Min_Stan'] else "W normie"
+            prog_alarmowy = st.session_state.receptura_baza.get(row['ID'], 0) * 20
+            jest_malo = row['Stan'] < prog_alarmowy
+            
+            alert = "item-card-alert" if jest_malo else "item-card-ok"
+            status_txt = f"Niski stan - brak na 20 rolek (Wymagane minimum: {prog_alarmowy:g} {row['Jednostka']})" if jest_malo else "Zapas zabezpieczony"
             st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan: {row["Stan"]:g} {row["Jednostka"]} ({status_txt})</div></div>', unsafe_allow_html=True)
 
     with tab_hist:
@@ -204,7 +223,7 @@ elif menu == "Moduł Production":
         m_jumbo = min(m_alu, m_bia, m_zie)
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("Aluminium wystarczy na:", f"{m_alu} szt.")
+        c1.metric("Alu wystarczy na:", f"{m_alu} szt.")
         c2.metric("Barwnik biały wystarczy na:", f"{m_bia} szt.")
         c3.metric("Barwnik zielony wystarczy na:", f"{m_zie} szt.")
         
@@ -262,7 +281,7 @@ elif menu == "Moduł Production":
             elif zuzyte_cm < wymagane_cm:
                 st.warning(f"Suma szerokości wynosi {zuzyte_cm} cm. Rozdysponuj jeszcze {wymagane_cm - zuzyte_cm} cm.")
             else:
-                st.error(f"Suma szerokości wynosi {zuzyte_cm} cm. Przekroczono limit o {zuzyte_cm - wymagane_cm} cm!")
+                st.error(f"Suma szerokości wynosi {zuzyte_cm} cm. Przekroczyłeś limit o {zuzyte_cm - wymagane_cm} cm!")
         else:
             st.warning("Brak rolek Jumbo na magazynie. Wyprodukuj je w Kroku 1.")
 
