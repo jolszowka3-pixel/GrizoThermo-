@@ -39,8 +39,8 @@ def pobierz_czcionki():
 # ==========================================
 # 1. INICJALIZACJA BAZY
 # ==========================================
-if 'init_v23' not in st.session_state:
-    st.session_state.init_v23 = True
+if 'init_v24' not in st.session_state:
+    st.session_state.init_v24 = True
     st.session_state.wz_counter = 1
     
     st.session_state.uzytkownicy = {
@@ -151,7 +151,9 @@ opcje = ["Pulpit Główny"]
 if st.session_state.aktualne_uprawnienia.get("produkcja"): opcje.append("Moduł Production")
 if st.session_state.aktualne_uprawnienia.get("pz"): opcje.append("Przyjęcie Towaru (PZ)")
 if st.session_state.aktualne_uprawnienia.get("wz"): opcje.append("Wydanie Towaru (WZ)")
-if st.session_state.aktualne_uprawnienia.get("pz") or st.session_state.aktualne_uprawnienia.get("wz"): opcje.append("Baza Kontrahentów (CRM)")
+if st.session_state.aktualne_uprawnienia.get("pz") or st.session_state.aktualne_uprawnienia.get("wz"):
+    opcje.append("Baza Kontrahentów (CRM)")
+    opcje.append("Archiwum Dokumentów")
 if st.session_state.aktualne_uprawnienia.get("admin"): opcje.append("Panel Administracyjny")
 
 menu = st.sidebar.radio("Wybierz moduł:", opcje)
@@ -240,7 +242,7 @@ elif menu == "Moduł Production":
                     st.success("Produkcja została pomyślnie zaksięgowana.")
                     st.rerun()
         else:
-            st.error("Brak wystarczających surowców na pfłną rolkę Jumbo.")
+            st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
 
     with tab2:
         st.subheader("Konfekcja (Rozkrój bez odpadu)")
@@ -306,9 +308,6 @@ elif menu == "Przyjęcie Towaru (PZ)":
                 st.success("Zapisano przyjęcie zewnętrzne.")
                 st.rerun()
 
-# ------------------------------------------------------------------
-# MODUŁ WZ: BEZPOŚREDNIE ODŚWIEŻANIE FORMULARZA I SEKTA ZAPISU PDF NA GÓRZE
-# ------------------------------------------------------------------
 elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
@@ -316,7 +315,6 @@ elif menu == "Wydanie Towaru (WZ)":
     if "wz_koszyk" not in st.session_state:
         st.session_state.wz_koszyk = []
     
-    # SYSTEM POBIERANIA: Wyświetla się na górze, gdy dokument jest gotowy, ale nie blokuje ponownego wpisywania!
     if "wygenerowane_pdf" in st.session_state:
         st.success(f"Zaksięgowano dokument: {st.session_state.nazwa_pliku_wz}")
         st.download_button(
@@ -374,7 +372,7 @@ elif menu == "Wydanie Towaru (WZ)":
                     
                 with col_p3:
                     st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
-                    if st.button("Dodaj do dokumentu", use_container_width=True):
+                    if st.button("Add to basket", use_container_width=True):
                         istnieje = False
                         for item in st.session_state.wz_koszyk:
                             if item["Wariant"] == prawdziwa_nazwa:
@@ -489,12 +487,64 @@ elif menu == "Wydanie Towaru (WZ)":
                         pdf.set_x(135)
                         pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
                         
-                        # Automatyczne czyszczenie i odświeżanie do nowego dokumentu
                         st.session_state.wygenerowane_pdf = bytes(pdf.output())
                         st.session_state.nazwa_pliku_wz = f"{nr_wz_auto.replace('/', '_')}.pdf"
-                        st.session_state.wz_counter = st.session_state.wz_counter
                         st.session_state.wz_koszyk = []
                         st.rerun()
+
+# ------------------------------------------
+# NOWY MODUŁ: ARCHIWUM DOKUMENTÓW PZ I WZ
+# ------------------------------------------
+elif menu == "Archiwum Dokumentów":
+    st.header("Archiwum Dokumentów")
+    st.write("Wgląd w historyczne dokumenty przyjęcia zewnętrzne oraz wydania zewnętrzne.")
+    
+    # Filtrujemy dane, aby pokazać tylko operacje zewnętrzne handlowe (PZ oraz WZ)
+    df_zewnetrzne = st.session_state.historia[st.session_state.historia["Typ"].isin(["PZ", "WZ"])].copy()
+    
+    if df_zewnetrzne.empty:
+        st.info("Brak zarejestrowanych dokumentów handlowych w archiwum.")
+    else:
+        # Pasek filtrów wyszukiwania
+        col_fil1, col_fil2, col_fil3 = st.columns(3)
+        with col_fil1:
+            filtr_typ = st.selectbox("Typ dokumentu", ["Wszystkie", "Tylko PZ", "Tylko WZ"])
+        with col_fil2:
+            filtr_nr = st.text_input("Szukaj po numerze dokumentu")
+        with col_fil3:
+            lista_firm = ["Wszyscy kontrahenci"] + sorted(list(df_zewnetrzne["Kontrahent"].unique()))
+            filtr_firma = st.selectbox("Filtruj według kontrahenta", lista_firm)
+            
+        # Zastosowanie filtrów logicznych na ramce danych
+        if filtr_typ == "Tylko PZ":
+            df_zewnetrzne = df_zewnetrzne[df_zewnetrzne["Typ"] == "PZ"]
+        elif filtr_typ == "Tylko WZ":
+            df_zewnetrzne = df_zewnetrzne[df_zewnetrzne["Typ"] == "WZ"]
+            
+        if filtr_nr.strip():
+            df_zewnetrzne = df_zewnetrzne[df_zewnetrzne["Dokument"].str.contains(filtr_nr.strip(), case=False, na=False)]
+            
+        if filtr_firma != "Wszyscy kontrahenci":
+            df_zewnetrzne = df_zewnetrzne[df_zewnetrzne["Kontrahent"] == filtr_firma]
+            
+        st.divider()
+        st.write(f"Znalezione pozycje: {len(df_zewnetrzne)}")
+        
+        # Wyświetlanie czystej tabeli logów bez indeksu i technicznych zawiłości
+        st.dataframe(
+            df_zewnetrzne.sort_values(by="Data", ascending=False),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Data": st.column_config.DatetimeColumn("Data operacji", format="YYYY-MM-DD HH:mm"),
+                "Typ": st.column_config.TextColumn("Typ"),
+                "Dokument": st.column_config.TextColumn("Numer dokumentu"),
+                "Produkt/Surowiec": st.column_config.TextColumn("Nazwa asortymentu"),
+                "Ilosc": st.column_config.NumberColumn("Ilość (szt./jm.)", format="%g"),
+                "Użytkownik": st.column_config.TextColumn("Operator"),
+                "Kontrahent": st.column_config.TextColumn("Kontrahent")
+            }
+        )
 
 elif menu == "Panel Administracyjny":
     st.header("Narzędzia Administracyjne")
