@@ -45,16 +45,16 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-# Profesjonalne, stonowane kolory dla trybu Dark Mode
+# Profesjonalne kolory dopasowane do jasnego tła
 def koloruj_status(val):
     if isinstance(val, str):
         if 'Niski stan' in val:
-            return 'color: #ff6b6b; font-weight: 500;' # Stonowany pastelowy czerwony
+            return 'color: #d32f2f; font-weight: 600;' # Głęboki, wyraźny czerwony
         elif 'W normie' in val:
-            return 'color: #81c784; font-weight: 400;' # Stonowany pastelowy zielony
+            return 'color: #2e7d32; font-weight: 500;' # Głęboki, wyraźny zielony
     return ''
 
-# Dodanie niestandardowego CSS dla jeszcze czystszego wyglądu (ukrycie górnego marginesu)
+# Subtelne formatowanie CSS dla zakładek (czysty wygląd)
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
@@ -105,7 +105,6 @@ if menu == "Pulpit Magazynowy":
     with tab_komp:
         st.subheader("Stan magazynu surowców")
         df_k = st.session_state.komponenty.copy()
-        # Zmiana tekstów na bardziej profesjonalne
         df_k["Status"] = df_k.apply(lambda row: "Niski stan" if row["Stan"] <= row["Min_Stan"] else "W normie", axis=1)
         
         styled_df_k = df_k.style.map(koloruj_status, subset=['Status'])
