@@ -35,8 +35,8 @@ def pobierz_czcionki():
 # ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
 # ==========================================
-if 'init_v12' not in st.session_state:
-    st.session_state.init_v12 = True
+if 'init_v13' not in st.session_state:
+    st.session_state.init_v13 = True
     
     st.session_state.wz_counter = 1
     
@@ -44,7 +44,7 @@ if 'init_v12' not in st.session_state:
         "admin": {
             "haslo": "admin123", 
             "imie": "Kierownik Magazynu",
-            "uprawnienia": {"produkcja": True, "magazyn": True, "admin": True}
+            "uprawnienia": {"produkcja": True, "pz": True, "wz": True, "admin": True}
         }
     }
     
@@ -95,7 +95,7 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-# CSS (Z nowymi stylami dla kafelków)
+# CSS
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
@@ -106,10 +106,9 @@ st.markdown("""
         .big-metric-label { font-size: 1.2rem; color: #6c757d; text-align: center; margin-bottom: 1rem; font-weight: 500; }
         .metric-card { background-color: #ffffff; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e9ecef; }
         
-        /* NOWE STYLE DLA ELEMENTÓW MAGAZYNU (MNIEJ TECHNICZNE) */
         .item-card { background-color: #ffffff; border-radius: 8px; padding: 18px 24px; margin-bottom: 16px; border: 1px solid #e9ecef; box-shadow: 0 2px 5px rgba(0,0,0,0.02); display: flex; justify-content: space-between; align-items: center; border-left: 4px solid #205493; }
-        .item-card-alert { border-left: 4px solid #d32f2f; } /* Czerwony pasek dla braków */
-        .item-card-ok { border-left: 4px solid #2e7d32; } /* Zielony pasek dla dobrych stanów */
+        .item-card-alert { border-left: 4px solid #d32f2f; }
+        .item-card-ok { border-left: 4px solid #2e7d32; }
         
         .item-info { display: flex; flex-direction: column; }
         .item-title { font-size: 1.15rem; font-weight: 600; color: #212529; margin: 0; padding: 0; }
@@ -121,7 +120,6 @@ st.markdown("""
         
         .badge-ok { background-color: #e8f5e9; color: #2e7d32; padding: 3px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; }
         .badge-alert { background-color: #ffebee; color: #c62828; padding: 3px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; }
-        
     </style>
 """, unsafe_allow_html=True)
 
@@ -152,7 +150,7 @@ if not st.session_state.zalogowany:
     st.stop()
 
 # ==========================================
-# MENU GŁÓWNE BOCZNE
+# MENU GŁÓWNE BOCZNE (Z ROZDZIELONYMI MODUŁAMI)
 # ==========================================
 st.sidebar.title("Nawigacja")
 
@@ -170,16 +168,22 @@ uprawnienia = st.session_state.aktualne_uprawnienia
 
 if uprawnienia.get("produkcja", False):
     opcje_menu.append("Moduł Produkcji")
-if uprawnienia.get("magazyn", False):
-    opcje_menu.append("Operacje Magazynowe (PZ/WZ)")
+if uprawnienia.get("pz", False):
+    opcje_menu.append("Przyjęcie Towaru (PZ)")
+if uprawnienia.get("wz", False):
+    opcje_menu.append("Wydanie Towaru (WZ)")
+    
+# Jeśli użytkownik ma dostęp do PZ lub WZ, pokazujemy mu bazę firm
+if uprawnienia.get("pz", False) or uprawnienia.get("wz", False):
     opcje_menu.append("Baza Kontrahentów (CRM)")
+    
 if uprawnienia.get("admin", False):
     opcje_menu.append("Panel Administracyjny")
 
 menu = st.sidebar.radio("Wybierz moduł:", opcje_menu)
 
 # ------------------------------------------
-# ZAKŁADKA 1: PULPIT GŁÓWNY (Z KAFELKAMI)
+# MODUŁ 1: PULPIT GŁÓWNY
 # ------------------------------------------
 if menu == "Pulpit Główny":
     st.header("Pulpit Zarządzania: GrizoThermo+")
@@ -215,13 +219,10 @@ if menu == "Pulpit Główny":
     
     tab_prod, tab_komp, tab_hist = st.tabs(["Wyroby Gotowe", "Surowce i Komponenty", "Historia Operacji"])
     
-    # ------------------
-    # WYROBY GOTOWE - KAFELKI
-    # ------------------
     with tab_prod:
         st.write("#### Lista Asortymentu")
         for index, row in st.session_state.produkty.iterrows():
-            html_produkt = f"""
+            st.markdown(f"""
             <div class="item-card">
                 <div class="item-info">
                     <p class="item-title">📦 {row['Wariant']}</p>
@@ -231,38 +232,26 @@ if menu == "Pulpit Główny":
                     <p class="item-value">{int(row['Stan'])} <span class="item-unit">szt.</span></p>
                 </div>
             </div>
-            """
-            st.markdown(html_produkt, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-    # ------------------
-    # SUROWCE - KAFELKI Z ETYKIETAMI
-    # ------------------
     with tab_komp:
         st.write("#### Magazyn Komponentów")
         for index, row in st.session_state.komponenty.iterrows():
             jest_malo = row['Stan'] <= row['Min_Stan']
             klasa_karty = "item-card-alert" if jest_malo else "item-card-ok"
             badge = f'<span class="badge-alert">⚠️ Poniżej minimum (Min: {row["Min_Stan"]})</span>' if jest_malo else f'<span class="badge-ok">✅ W normie (Min: {row["Min_Stan"]})</span>'
-            
-            # Formaty zapisu bez niepotrzebnych zer po przecinku
-            stan_format = f"{row['Stan']:g}"
-            
-            html_surowiec = f"""
+            st.markdown(f"""
             <div class="item-card {klasa_karty}">
                 <div class="item-info">
                     <p class="item-title">🧱 {row['Nazwa']} <span style="font-size: 0.8rem; color: #aaa; margin-left: 8px;">[{row['ID']}]</span></p>
                     <p class="item-subtitle">{badge}</p>
                 </div>
                 <div class="item-value-box">
-                    <p class="item-value">{stan_format} <span class="item-unit">{row['Jednostka']}</span></p>
+                    <p class="item-value">{row['Stan']:g} <span class="item-unit">{row['Jednostka']}</span></p>
                 </div>
             </div>
-            """
-            st.markdown(html_surowiec, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-    # ------------------
-    # HISTORIA - POZOSTAJE TABELĄ
-    # ------------------
     with tab_hist:
         st.write("#### Dziennik Ruchów Magazynowych")
         st.dataframe(
@@ -276,7 +265,7 @@ if menu == "Pulpit Główny":
         )
 
 # ------------------------------------------
-# ZAKŁADKA 2: PRODUKCJA 
+# MODUŁ 2: PRODUKCJA 
 # ------------------------------------------
 elif menu == "Moduł Produkcji":
     st.header("Zarządzanie Produkcją: GrizoThermo+")
@@ -321,7 +310,7 @@ elif menu == "Moduł Produkcji":
                 st.rerun()
 
 # ------------------------------------------
-# ZAKŁADKA 3: BAZA KONTRAHENTÓW (CRM)
+# MODUŁ 3: BAZA KONTRAHENTÓW (CRM)
 # ------------------------------------------
 elif menu == "Baza Kontrahentów (CRM)":
     st.header("Baza Kontrahentów (Klienci i Dostawcy)")
@@ -336,11 +325,7 @@ elif menu == "Baza Kontrahentów (CRM)":
             "Nazwa": st.column_config.TextColumn("Nazwa Firmy", required=True),
             "NIP": st.column_config.TextColumn("Numer NIP", required=False),
             "Adres": st.column_config.TextColumn("Pełny Adres", required=True),
-            "Typ": st.column_config.SelectboxColumn(
-                "Typ firmy",
-                options=["Dostawca", "Odbiorca"],
-                required=True
-            )
+            "Typ": st.column_config.SelectboxColumn("Typ firmy", options=["Dostawca", "Odbiorca"], required=True)
         }
     )
     
@@ -350,172 +335,174 @@ elif menu == "Baza Kontrahentów (CRM)":
         st.rerun()
 
 # ------------------------------------------
-# ZAKŁADKA 4: OPERACJE MAGAZYNOWE (PZ / WZ - GENERATOR)
+# MODUŁ 4: PRZYJĘCIE TOWARU (PZ)
 # ------------------------------------------
-elif menu == "Operacje Magazynowe (PZ/WZ)":
-    st.header("Zarządzanie Zapasami (PZ/WZ)")
+elif menu == "Przyjęcie Towaru (PZ)":
+    st.header("Przyjęcie Zewnętrzne (PZ)")
+    st.subheader("Rejestracja nowej dostawy surowców do magazynu")
     
-    tab_pz, tab_wz = st.tabs(["Przyjęcie Zewnętrzne (PZ)", "Wydanie Zewnętrzne (WZ)"])
+    dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]["Nazwa"].tolist()
     
-    with tab_pz:
-        st.subheader("Rejestracja nowej dostawy surowców")
-        dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]["Nazwa"].tolist()
-        
-        if not dostawcy:
-            st.warning("Brak dostawców w bazie! Przejdź do zakładki 'Baza Kontrahentów (CRM)', aby ich dodać.")
-        else:
-            with st.form("pz_form"):
-                nr_doc = st.text_input("Numer dokumentu (np. nr faktury, WZ dostawcy)")
-                wybrany_dostawca = st.selectbox("Dostawca", dostawcy)
-                wybrany_komp = st.selectbox("Wybierz przyjmowany surowiec", st.session_state.komponenty["Nazwa"].tolist())
-                ilosc = st.number_input("Ilość przyjmowana (zgodnie z jm.)", min_value=0.1, value=100.0)
-                
-                if st.form_submit_button("Zatwierdź dokument PZ"):
-                    idx = st.session_state.komponenty.index[st.session_state.komponenty["Nazwa"] == wybrany_komp][0]
-                    st.session_state.komponenty.at[idx, "Stan"] += ilosc
-                    dodaj_ruch("PZ", nr_doc, wybrany_komp, ilosc, wybrany_dostawca)
-                    st.success("Dokument PZ został pomyślnie zapisany w systemie.")
-                    st.rerun()
-
-    with tab_wz:
-        st.subheader("Wydanie produktów do klienta (Generator PDF)")
-        odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
-        
-        if "wygenerowane_pdf" in st.session_state:
-            st.success(f"Transakcja zaksięgowana. Dokument {st.session_state.nazwa_pliku_wz} jest gotowy do pobrania.")
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                st.download_button(
-                    label="📄 Pobierz oficjalny dokument WZ (.pdf)",
-                    data=st.session_state.wygenerowane_pdf,
-                    file_name=st.session_state.nazwa_pliku_wz,
-                    mime="application/pdf",
-                    use_container_width=True
-                )
-            with col_btn2:
-                if st.button("⬅️ Wyczyść formularz i wystaw kolejny dokument", use_container_width=True):
-                    del st.session_state.wygenerowane_pdf
-                    del st.session_state.nazwa_pliku_wz
-                    st.rerun()
-                    
-        elif not odbiorcy:
-            st.warning("Brak odbiorców w bazie! Przejdź do zakładki 'Baza Kontrahentów (CRM)', aby ich dodać.")
-        else:
-            data_dzis_str = datetime.now().strftime("%Y/%m/%d")
-            nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
+    if not dostawcy:
+        st.warning("Brak dostawców w bazie! Przejdź do zakładki 'Baza Kontrahentów (CRM)', aby ich dodać.")
+    else:
+        with st.form("pz_form"):
+            nr_doc = st.text_input("Numer dokumentu (np. nr faktury zakupu, WZ dostawcy)")
+            wybrany_dostawca = st.selectbox("Dostawca surowca", dostawcy)
+            wybrany_komp = st.selectbox("Wybierz surowiec", st.session_state.komponenty["Nazwa"].tolist())
+            ilosc = st.number_input("Ilość przyjmowana", min_value=0.1, value=100.0)
             
-            with st.form("wz_form"):
-                col_f1, col_f2 = st.columns(2)
-                with col_f1:
-                    nr_doc_wz = st.text_input("Numer dokumentu (Auto)", value=nr_wz_auto, disabled=True)
-                    wybrany_klient = st.selectbox("Nabywca (Wybierz z bazy)", odbiorcy)
-                    
-                with col_f2:
-                    wybrany_prod = st.selectbox("Wybierz asortyment", st.session_state.produkty["Wariant"].tolist())
-                    stan_obecny = st.session_state.produkty[st.session_state.produkty["Wariant"] == wybrany_prod]["Stan"].values[0]
-                    st.caption(f"Dostępne na magazynie: {stan_obecny} szt.")
-                    ilosc_wz = st.number_input("Ilość do wydania", min_value=1, max_value=int(stan_obecny) if stan_obecny > 0 else 1)
-                    uwagi_doc = st.text_input("Uwagi do dokumentu", value="Dostawa z magazynu głównego.")
-
-                if st.form_submit_button("Zatwierdź i Wystaw PDF"):
-                    if ilosc_wz <= stan_obecny:
-                        dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
-                        klient_adres = dane_klienta["Adres"]
-                        klient_nip = dane_klienta["NIP"]
-                        
-                        idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == wybrany_prod][0]
-                        st.session_state.produkty.at[idx, "Stan"] -= ilosc_wz
-                        dodaj_ruch("WZ", nr_doc_wz, wybrany_prod, ilosc_wz, wybrany_klient)
-                        st.session_state.wz_counter += 1
-                        
-                        font_path, font_bold_path = pobierz_czcionki()
-                        
-                        pdf = FPDF()
-                        pdf.add_page()
-                        pdf.add_font("Roboto", "", font_path)
-                        pdf.add_font("Roboto", "B", font_bold_path)
-                        
-                        pdf.set_fill_color(240, 240, 240)
-                        pdf.set_font("Roboto", "B", 15)
-                        pdf.cell(0, 12, f"WYDANIE ZEWNĘTRZNE (WZ) NR {nr_doc_wz}", border=0, ln=1, align='C', fill=True)
-                        
-                        pdf.set_font("Roboto", "", 9)
-                        pdf.set_text_color(100, 100, 100)
-                        data_aktualna = datetime.now().strftime("%Y-%m-%d")
-                        pdf.cell(0, 6, f"Data wydania: {data_aktualna}   |   Miejsce wystawienia: {MOJA_FIRMA['miejscowosc_wystawienia']}", border=0, ln=1, align='R')
-                        pdf.set_text_color(0, 0, 0) 
-                        pdf.ln(8)
-                        
-                        y_start = pdf.get_y()
-                        
-                        pdf.set_fill_color(248, 248, 248)
-                        pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(90, 7, "  SPRZEDAWCA / WYSTAWCA", border=0, ln=1, fill=True)
-                        pdf.set_font("Roboto", "", 9)
-                        firma_tekst = f"{MOJA_FIRMA['nazwa']}\n{MOJA_FIRMA['adres']}\n{MOJA_FIRMA['nip']}\n{MOJA_FIRMA['kontakt']}"
-                        pdf.multi_cell(90, 5, firma_tekst, border=0)
-                        y_left = pdf.get_y()
-                        
-                        pdf.set_xy(105, y_start)
-                        pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(90, 7, "  NABYWCA / ODBIORCA", border=0, ln=1, fill=True)
-                        pdf.set_xy(105, y_start + 7)
-                        pdf.set_font("Roboto", "", 9)
-                        nip_czysty = f"NIP: {klient_nip}" if pd.notna(klient_nip) and str(klient_nip).strip() else ""
-                        pdf.multi_cell(90, 5, f"{wybrany_klient}\n{klient_adres}\n{nip_czysty}", border=0)
-                        y_right = pdf.get_y()
-                        
-                        pdf.set_y(max(y_left, y_right) + 12)
-                        
-                        pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(0, 8, "POZYCJE DOKUMENTU", border="B", ln=1)
-                        pdf.ln(3)
-                        
-                        pdf.set_fill_color(230, 235, 245)
-                        pdf.set_font("Roboto", "B", 9)
-                        pdf.cell(15, 8, "Lp.", border=1, align='C', fill=True)
-                        pdf.cell(115, 8, "Nazwa asortymentu", border=1, align='L', fill=True)
-                        pdf.cell(30, 8, "Ilość", border=1, align='C', fill=True)
-                        pdf.cell(30, 8, "Jm.", border=1, align='C', ln=1, fill=True)
-                        
-                        pdf.set_font("Roboto", "", 9)
-                        pdf.cell(15, 8, "1", border=1, align='C')
-                        pdf.cell(115, 8, wybrany_prod, border=1, align='L')
-                        pdf.cell(30, 8, str(ilosc_wz), border=1, align='C')
-                        pdf.cell(30, 8, "szt.", border=1, align='C', ln=1)
-                        
-                        pdf.ln(10)
-                        if uwagi_doc.strip():
-                            pdf.set_font("Roboto", "B", 9)
-                            pdf.cell(15, 5, "Uwagi:", border=0)
-                            pdf.set_font("Roboto", "", 9)
-                            pdf.multi_cell(0, 5, uwagi_doc.strip(), border=0)
-                        
-                        pdf.ln(25)
-                        y_sig = pdf.get_y()
-                        
-                        pdf.set_font("Roboto", "", 8.5)
-                        pdf.set_xy(15, y_sig)
-                        pdf.cell(60, 5, "..........................................................", align='C', ln=1)
-                        pdf.set_x(15)
-                        pdf.cell(60, 5, f"Wystawił: {st.session_state.aktualny_uzytkownik}", align='C')
-                        
-                        pdf.set_xy(135, y_sig)
-                        pdf.cell(60, 5, "..........................................................", align='C', ln=1)
-                        pdf.set_x(135)
-                        pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
-                        
-                        pdf_bytes = bytes(pdf.output())
-                        st.session_state.wygenerowane_pdf = pdf_bytes
-                        safe_name = nr_doc_wz.replace('/', '_')
-                        st.session_state.nazwa_pliku_wz = f"{safe_name}.pdf"
-                        
-                        st.rerun()
-                    else:
-                        st.error("Odrzucono: Niewystarczająca ilość asortymentu na magazynie.")
+            if st.form_submit_button("Zatwierdź dokument PZ"):
+                idx = st.session_state.komponenty.index[st.session_state.komponenty["Nazwa"] == wybrany_komp][0]
+                st.session_state.komponenty.at[idx, "Stan"] += ilosc
+                dodaj_ruch("PZ", nr_doc, wybrany_komp, ilosc, wybrany_dostawca)
+                st.success("Dokument PZ został pomyślnie zapisany w systemie. Stan surowca wzrósł.")
+                st.rerun()
 
 # ------------------------------------------
-# ZAKŁADKA 5: PANEL ADMINA
+# MODUŁ 5: WYDANIE TOWARU (WZ + PDF)
+# ------------------------------------------
+elif menu == "Wydanie Towaru (WZ)":
+    st.header("Wydanie Zewnętrzne (WZ)")
+    st.subheader("Wydanie produktów do klienta i Generator PDF")
+    
+    odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
+    
+    if "wygenerowane_pdf" in st.session_state:
+        st.success(f"Transakcja zaksięgowana. Dokument {st.session_state.nazwa_pliku_wz} jest gotowy do pobrania.")
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            st.download_button(
+                label="📄 Pobierz oficjalny dokument WZ (.pdf)",
+                data=st.session_state.wygenerowane_pdf,
+                file_name=st.session_state.nazwa_pliku_wz,
+                mime="application/pdf",
+                use_container_width=True
+            )
+        with col_btn2:
+            if st.button("⬅️ Wyczyść formularz i wystaw kolejny dokument", use_container_width=True):
+                del st.session_state.wygenerowane_pdf
+                del st.session_state.nazwa_pliku_wz
+                st.rerun()
+                
+    elif not odbiorcy:
+        st.warning("Brak odbiorców w bazie! Przejdź do zakładki 'Baza Kontrahentów (CRM)', aby ich dodać.")
+    else:
+        data_dzis_str = datetime.now().strftime("%Y/%m/%d")
+        nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
+        
+        with st.form("wz_form"):
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                nr_doc_wz = st.text_input("Numer dokumentu (Auto)", value=nr_wz_auto, disabled=True)
+                wybrany_klient = st.selectbox("Nabywca (Wybierz z bazy)", odbiorcy)
+                
+            with col_f2:
+                wybrany_prod = st.selectbox("Wybierz asortyment", st.session_state.produkty["Wariant"].tolist())
+                stan_obecny = st.session_state.produkty[st.session_state.produkty["Wariant"] == wybrany_prod]["Stan"].values[0]
+                st.caption(f"Dostępne na magazynie: {stan_obecny} szt.")
+                ilosc_wz = st.number_input("Ilość do wydania", min_value=1, max_value=int(stan_obecny) if stan_obecny > 0 else 1)
+                uwagi_doc = st.text_input("Uwagi do dokumentu", value="Dostawa z magazynu głównego.")
+
+            if st.form_submit_button("Zatwierdź i Wystaw PDF"):
+                if ilosc_wz <= stan_obecny:
+                    dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
+                    klient_adres = dane_klienta["Adres"]
+                    klient_nip = dane_klienta["NIP"]
+                    
+                    idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == wybrany_prod][0]
+                    st.session_state.produkty.at[idx, "Stan"] -= ilosc_wz
+                    dodaj_ruch("WZ", nr_doc_wz, wybrany_prod, ilosc_wz, wybrany_klient)
+                    st.session_state.wz_counter += 1
+                    
+                    font_path, font_bold_path = pobierz_czcionki()
+                    
+                    pdf = FPDF()
+                    pdf.add_page()
+                    pdf.add_font("Roboto", "", font_path)
+                    pdf.add_font("Roboto", "B", font_bold_path)
+                    
+                    pdf.set_fill_color(240, 240, 240)
+                    pdf.set_font("Roboto", "B", 15)
+                    pdf.cell(0, 12, f"WYDANIE ZEWNĘTRZNE (WZ) NR {nr_doc_wz}", border=0, ln=1, align='C', fill=True)
+                    
+                    pdf.set_font("Roboto", "", 9)
+                    pdf.set_text_color(100, 100, 100)
+                    data_aktualna = datetime.now().strftime("%Y-%m-%d")
+                    pdf.cell(0, 6, f"Data wydania: {data_aktualna}   |   Miejsce wystawienia: {MOJA_FIRMA['miejscowosc_wystawienia']}", border=0, ln=1, align='R')
+                    pdf.set_text_color(0, 0, 0) 
+                    pdf.ln(8)
+                    
+                    y_start = pdf.get_y()
+                    
+                    pdf.set_fill_color(248, 248, 248)
+                    pdf.set_font("Roboto", "B", 10)
+                    pdf.cell(90, 7, "  SPRZEDAWCA / WYSTAWCA", border=0, ln=1, fill=True)
+                    pdf.set_font("Roboto", "", 9)
+                    firma_tekst = f"{MOJA_FIRMA['nazwa']}\n{MOJA_FIRMA['adres']}\n{MOJA_FIRMA['nip']}\n{MOJA_FIRMA['kontakt']}"
+                    pdf.multi_cell(90, 5, firma_tekst, border=0)
+                    y_left = pdf.get_y()
+                    
+                    pdf.set_xy(105, y_start)
+                    pdf.set_font("Roboto", "B", 10)
+                    pdf.cell(90, 7, "  NABYWCA / ODBIORCA", border=0, ln=1, fill=True)
+                    pdf.set_xy(105, y_start + 7)
+                    pdf.set_font("Roboto", "", 9)
+                    nip_czysty = f"NIP: {klient_nip}" if pd.notna(klient_nip) and str(klient_nip).strip() else ""
+                    pdf.multi_cell(90, 5, f"{wybrany_klient}\n{klient_adres}\n{nip_czysty}", border=0)
+                    y_right = pdf.get_y()
+                    
+                    pdf.set_y(max(y_left, y_right) + 12)
+                    
+                    pdf.set_font("Roboto", "B", 10)
+                    pdf.cell(0, 8, "POZYCJE DOKUMENTU", border="B", ln=1)
+                    pdf.ln(3)
+                    
+                    pdf.set_fill_color(230, 235, 245)
+                    pdf.set_font("Roboto", "B", 9)
+                    pdf.cell(15, 8, "Lp.", border=1, align='C', fill=True)
+                    pdf.cell(115, 8, "Nazwa asortymentu", border=1, align='L', fill=True)
+                    pdf.cell(30, 8, "Ilość", border=1, align='C', fill=True)
+                    pdf.cell(30, 8, "Jm.", border=1, align='C', ln=1, fill=True)
+                    
+                    pdf.set_font("Roboto", "", 9)
+                    pdf.cell(15, 8, "1", border=1, align='C')
+                    pdf.cell(115, 8, wybrany_prod, border=1, align='L')
+                    pdf.cell(30, 8, str(ilosc_wz), border=1, align='C')
+                    pdf.cell(30, 8, "szt.", border=1, align='C', ln=1)
+                    
+                    pdf.ln(10)
+                    if uwagi_doc.strip():
+                        pdf.set_font("Roboto", "B", 9)
+                        pdf.cell(15, 5, "Uwagi:", border=0)
+                        pdf.set_font("Roboto", "", 9)
+                        pdf.multi_cell(0, 5, uwagi_doc.strip(), border=0)
+                    
+                    pdf.ln(25)
+                    y_sig = pdf.get_y()
+                    
+                    pdf.set_font("Roboto", "", 8.5)
+                    pdf.set_xy(15, y_sig)
+                    pdf.cell(60, 5, "..........................................................", align='C', ln=1)
+                    pdf.set_x(15)
+                    pdf.cell(60, 5, f"Wystawił: {st.session_state.aktualny_uzytkownik}", align='C')
+                    
+                    pdf.set_xy(135, y_sig)
+                    pdf.cell(60, 5, "..........................................................", align='C', ln=1)
+                    pdf.set_x(135)
+                    pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
+                    
+                    pdf_bytes = bytes(pdf.output())
+                    st.session_state.wygenerowane_pdf = pdf_bytes
+                    safe_name = nr_doc_wz.replace('/', '_')
+                    st.session_state.nazwa_pliku_wz = f"{safe_name}.pdf"
+                    
+                    st.rerun()
+                else:
+                    st.error("Odrzucono: Niewystarczająca ilość asortymentu na magazynie.")
+
+# ------------------------------------------
+# MODUŁ 6: PANEL ADMINA
 # ------------------------------------------
 elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.get("admin", False):
     st.header("Narzędzia Administracyjne")
@@ -531,9 +518,10 @@ elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.g
             lista_uzytkownikow.append({
                 "Login": l,
                 "Imię i Nazwisko": dane["imie"],
-                "Dostęp: Produkcja": "Tak" if dane["uprawnienia"].get("produkcja") else "Nie",
-                "Dostęp: PZ/WZ": "Tak" if dane["uprawnienia"].get("magazyn") else "Nie",
-                "Dostęp: Admin": "Tak" if dane["uprawnienia"].get("admin") else "Nie"
+                "Uprawnienie: Produkcja": "Tak" if dane["uprawnienia"].get("produkcja") else "Nie",
+                "Uprawnienie: Przyjęcia PZ": "Tak" if dane["uprawnienia"].get("pz") else "Nie",
+                "Uprawnienie: Wydania WZ": "Tak" if dane["uprawnienia"].get("wz") else "Nie",
+                "Uprawnienie: Admin": "Tak" if dane["uprawnienia"].get("admin") else "Nie"
             })
             
         st.dataframe(pd.DataFrame(lista_uzytkownikow), use_container_width=True, hide_index=True)
@@ -549,7 +537,8 @@ elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.g
             with colB:
                 st.write("Wybierz uprawnienia dla konta:")
                 upr_produkcja = st.checkbox("Dostęp do Modułu Produkcji")
-                upr_magazyn = st.checkbox("Dostęp do Operacji Magazynowych (PZ/WZ) oraz CRM")
+                upr_pz = st.checkbox("Dostęp do Przyjęć Towaru (PZ)")
+                upr_wz = st.checkbox("Dostęp do Wydań Towaru (WZ)")
                 upr_admin = st.checkbox("Dostęp do Panelu Administracyjnego")
                 
             if st.form_submit_button("Utwórz konto"):
@@ -564,7 +553,8 @@ elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.g
                         "imie": nowe_imie,
                         "uprawnienia": {
                             "produkcja": upr_produkcja,
-                            "magazyn": upr_magazyn,
+                            "pz": upr_pz,
+                            "wz": upr_wz,
                             "admin": upr_admin
                         }
                     }
