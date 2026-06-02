@@ -27,16 +27,20 @@ def pobierz_czcionki():
     reg_path = "Roboto-Regular.ttf"
     bold_path = "Roboto-Bold.ttf"
     if not os.path.exists(reg_path):
-        urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf", reg_path)
+        try:
+            urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf", reg_path)
+        except: pass
     if not os.path.exists(bold_path):
-        urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf", bold_path)
+        try:
+            urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf", bold_path)
+        except: pass
     return reg_path, bold_path
 
 # ==========================================
 # 1. INICJALIZACJA BAZY (MACIERZ PRODUKTÓW)
 # ==========================================
-if 'init_v15' not in st.session_state:
-    st.session_state.init_v15 = True
+if 'init_v16' not in st.session_state:
+    st.session_state.init_v16 = True
     st.session_state.wz_counter = 1
     
     st.session_state.uzytkownicy = {
@@ -113,6 +117,12 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
         "Kontrahent": kontrahent
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
+
+def koloruj_status(val):
+    if isinstance(val, str):
+        if 'Niski stan' in val: return 'color: #d32f2f; font-weight: 600;' 
+        elif 'W normie' in val: return 'color: #2e7d32; font-weight: 500;' 
+    return ''
 
 # CSS
 st.markdown("""
@@ -221,7 +231,6 @@ if menu == "Pulpit Główny":
     
     with tab_prod:
         st.write("#### Magazyn Gotowych Wariantów (Wszystkie 13mb)")
-        # Filtrujemy, aby pokazać tylko te warianty, które faktycznie mają stan > 0 dla czystości interfejsu (lub pokazujemy wszystkie)
         pokaz_wszystkie = st.checkbox("Pokaż również warianty z zerowym stanem", value=True)
         
         for index, row in st.session_state.produkty.iterrows():
@@ -308,53 +317,59 @@ elif menu == "Moduł Production":
         col3.metric("Barwnik zielony wystarczy na:", f"{max_mb_zielony} mb")
         
         st.divider()
+        
+        # BEZPIECZNIK KROKU 1: Blokada formularza przy braku surowców
         if max_mb_maty > 0:
             st.info(f"Maksymalny wolumen produkcji dla Kroku 1: {max_mb_maty} mb maty bazowej.")
+            with st.form("produkcja_maszyna_form"):
+                ile_mb = st.number_input("Wprowadź ilość wyprodukowanych metrów bieżących (mb)", min_value=1, max_value=max_mb_maty, value=1)
+                
+                if st.form_submit_button("Zaksięguj produkcję z Maszyny Głównej"):
+                    st.session_state.polprodukty.at[0, "Stan"] += ile_mb
+                    nazwa_p = st.session_state.polprodukty.at[0, "Nazwa"]
+                    dodaj_ruch("PW (Półprod.)", "Hala Główna", nazwa_p, ile_mb, "Wytłaczarka")
+                    
+                    for komp_id, zuzycie_na_1mb in st.session_state.receptura_baza.items():
+                        idx_komp = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == komp_id][0]
+                        zuzycie_laczne = zuzycie_na_1mb * ile_mb
+                        st.session_state.komponenty.at[idx_komp, "Stan"] -= zuzycie_laczne
+                        dodaj_ruch("RW", "Hala Główna", st.session_state.komponenty.at[idx_komp, "Nazwa"], zuzycie_laczne, "Wytłaczarka")
+                    
+                    st.success(f"Pomyślnie dodano {ile_mb} mb do magazynu półproduktów.")
+                    st.rerun()
         else:
-            st.warning("Brak surowców do uruchomienia maszyny głównej!")
-
-        with st.form("produkcja_maszyna_form"):
-            ile_mb = st.number_input("Wprowadź ilość wyprodukowanych metrów bieżących (mb)", min_value=1, max_value=max_mb_maty if max_mb_maty > 0 else 1, value=1 if max_mb_maty > 0 else 0)
-            
-            if st.form_submit_button("Zaksięguj produkcję z Maszyny Głównej", disabled=(max_mb_maty == 0)):
-                st.session_state.polprodukty.at[0, "Stan"] += ile_mb
-                nazwa_p = st.session_state.polprodukty.at[0, "Nazwa"]
-                dodaj_ruch("PW (Półprod.)", "Hala Główna", max_mb_maty, ile_mb, "Wytłaczarka")
-                
-                for komp_id, zuzycie_na_1mb in st.session_state.receptura_baza.items():
-                    idx_komp = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == komp_id][0]
-                    zuzycie_laczne = zuzycie_na_1mb * ile_mb
-                    st.session_state.komponenty.at[idx_komp, "Stan"] -= zuzycie_laczne
-                    dodaj_ruch("RW", "Hala Główna", st.session_state.komponenty.at[idx_komp, "Nazwa"], zuzycie_laczne, "Wytłaczarka")
-                
-                st.success(f"Pomyślnie dodano {ile_mb} mb do magazynu półproduktów.")
-                st.rerun()
+            st.error("Brak surowców do uruchomienia maszyny głównej!")
 
     with tab_konfekcja:
         st.subheader("Konfekcja i Rozkrój (Zawsze na odcinki 13mb)")
         stan_maty = st.session_state.polprodukty.at[0, "Stan"]
         st.info(f"Dostępny zapas materiału bazowego: {stan_maty:.1f} mb")
         
-        with st.form("produkcja_konfekcja_form"):
-            wybrany_wariant = st.selectbox("Wybierz docelowy wariant do wyprodukowania", st.session_state.produkty["Wariant"].tolist())
-            zuzycie_maty_na_sztuke = st.session_state.produkty[st.session_state.produkty["Wariant"] == wybrany_wariant]["Zuzycie_Maty"].values[0]
-            
-            max_sztuk_wariantu = int(stan_maty / zuzycie_maty_na_sztuke) if zuzycie_maty_na_sztuke > 0 else 0
-            st.caption(f"Ta rolka wymaga ekwiwalentu {zuzycie_maty_na_sztuke} mb pełnowymiarowej maty bazowej. Możesz wyciąć maksymalnie: {max_sztuk_wariantu} szt.")
-            
-            ile_sztuk = st.number_input("Wprowadź ilość gotowych rolek (szt.)", min_value=1, max_value=max_sztuk_wariantu if max_sztuk_wariantu > 0 else 1, value=1 if max_sztuk_wariantu > 0 else 0)
-            
-            if st.form_submit_button("Zatwierdź rozkrój i konfekcję", disabled=(max_sztuk_wariantu == 0)):
-                zuzyte_mb = round(ile_sztuk * zuzycie_maty_na_sztuke, 2)
-                st.session_state.polprodukty.at[0, "Stan"] -= zuzyte_mb
-                dodaj_ruch("RW (Półprod.)", "Stanowisko Cięcia", st.session_state.polprodukty.at[0, "Nazwa"], zuzyte_mb, "Konfekcja")
+        # Wybór wariantu poza formularzem, aby dynamicznie i płynnie przeliczać nawoje
+        wybrany_wariant = st.selectbox("Wybierz docelowy wariant do wyprodukowania", st.session_state.produkty["Wariant"].tolist())
+        zuzycie_maty_na_sztuke = st.session_state.produkty[st.session_state.produkty["Wariant"] == wybrany_wariant]["Zuzycie_Maty"].values[0]
+        
+        max_sztuk_wariantu = int(stan_maty / zuzycie_maty_na_sztuke) if zuzycie_maty_na_sztuke > 0 else 0
+        st.caption(f"Ta rolka wymaga ekwiwalentu {zuzycie_maty_na_sztuke} mb pełnowymiarowej maty bazowej. Możesz wyciąć maksymalnie: {max_sztuk_wariantu} szt.")
+        
+        # BEZPIECZNIK KROKU 2: Warunkowy formularz zapobiegający StreamlitValueBelowMinError
+        if max_sztuk_wariantu > 0:
+            with st.form("produkcja_konfekcja_form"):
+                ile_sztuk = st.number_input("Wprowadź ilość gotowych rolek (szt.)", min_value=1, max_value=max_sztuk_wariantu, value=1)
                 
-                idx_prod = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == wybrany_wariant][0]
-                st.session_state.produkty.at[idx_prod, "Stan"] += ile_sztuk
-                dodaj_ruch("PW (Gotowe)", "Stanowisko Cięcia", wybrany_wariant, ile_sztuk, "Konfekcja")
-                
-                st.success(f"Pomyślnie pocięto i wprowadzono na stan {ile_sztuk} szt. produktu gotowego.")
-                st.rerun()
+                if st.form_submit_button("Zatwierdź rozkrój i konfekcję"):
+                    zuzyte_mb = round(ile_sztuk * zuzycie_maty_na_sztuke, 2)
+                    st.session_state.polprodukty.at[0, "Stan"] -= zuzyte_mb
+                    dodaj_ruch("RW (Półprod.)", "Stanowisko Cięcia", st.session_state.polprodukty.at[0, "Nazwa"], zuzyte_mb, "Konfekcja")
+                    
+                    idx_prod = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == wybrany_wariant][0]
+                    st.session_state.produkty.at[idx_prod, "Stan"] += ile_sztuk
+                    dodaj_ruch("PW (Gotowe)", "Stanowisko Cięcia", wybrany_wariant, ile_sztuk, "Konfekcja")
+                    
+                    st.success(f"Pomyślnie pocięto i wprowadzono na stan {ile_sztuk} szt. produktu gotowego.")
+                    st.rerun()
+        else:
+            st.error("Brak wystarczającej ilości maty bazowej, aby wydać chociaż 1 sztukę tego wariantu!")
 
 # ------------------------------------------
 # MODUŁ 3: BAZA KONTRAHENTÓW (CRM)
@@ -523,6 +538,8 @@ elif menu == "Wydanie Towaru (WZ)":
                     st.session_state.wygenerowane_pdf = bytes(pdf.output())
                     st.session_state.nazwa_pliku_wz = f"{nr_doc_wz.replace('/', '_')}.pdf"
                     st.rerun()
+                else:
+                    st.error("Odrzucono: Niewystarczająca ilość asortymentu na magazynie.")
 
 # ------------------------------------------
 # MODUŁ 6: PANEL ADMINA
@@ -573,6 +590,7 @@ elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.g
         if st.button("Zapisz korektę surowców"):
             st.session_state.komponenty = zmienione_komponenty
             dodaj_ruch("KOREKTA", "Admin", "Wiele surowców", 0)
+            st.success("Pomyślnie zmodyfikowano stany surowców.")
             st.rerun()
 
     with tab_korekt_prod:
@@ -580,4 +598,5 @@ elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.g
         if st.button("Zapisz korektę produktów"):
             st.session_state.produkty = zmienione_produkty
             dodaj_ruch("KOREKTA", "Admin", "Wiele produktów", 0)
+            st.success("Pomyślnie zmodyfikowano stany wyrobów.")
             st.rerun()
