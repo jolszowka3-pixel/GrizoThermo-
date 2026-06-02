@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY 
+# 1. INICJALIZACJA BAZY
 # ==========================================
-if 'init_v22' not in st.session_state:
-    st.session_state.init_v22 = True
+if 'init_v23' not in st.session_state:
+    st.session_state.init_v23 = True
     st.session_state.wz_counter = 1
     
     st.session_state.uzytkownicy = {
@@ -85,13 +85,7 @@ if 'init_v22' not in st.session_state:
             })
             
     st.session_state.produkty = pd.DataFrame(produkty_list)
-    
-    # AKTUALIZACJA RECEPTURY ZGODNIE Z TWOIMI WYMIARAMI NA 1 SZTUKĘ JUMBO
-    st.session_state.receptura_baza = {
-        "K01": 32.00,  # 32 mb aluminium zbrojonego
-        "K02": 0.200,  # 0.2 kg barwnika białego
-        "K03": 0.100   # 0.1 kg barwnika zielonego
-    }
+    st.session_state.receptura_baza = {"K01": 32.00, "K02": 0.200, "K03": 0.100}
     
     st.session_state.historia = pd.DataFrame(columns=[
         "Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"
@@ -181,7 +175,7 @@ if menu == "Pulpit Główny":
             braki_surowcowe.append(f"{row_k['Nazwa']} (Aktualnie: {row_k['Stan']:g} {row_k['Jednostka']}, Brakuje: {niedobor:g} {row_k['Jednostka']})")
             
     if braki_surowcowe:
-        st.error("**KOMUNIKAT SYSTEMOWY: Krytyczny stan surowców**\n\nZapas następujących materiałów uniemożliwia wyprodukowanie partii 20 rolek Jumbo:\n\n" + "\n".join([f"* {b}" for b in braki_surowcowe]))
+        st.error("KOMUNIKAT SYSTEMOWY: Krytyczny stan surowców\n\nZapas następujących materiałów uniemożliwia wyprodukowanie partii 20 rolek Jumbo:\n\n" + "\n".join([f"* {b}" for b in braki_surowcowe]))
         st.write("")
 
     tab_prod, tab_polprod, tab_komp, tab_hist = st.tabs(["Wyroby Gotowe", "Półprodukty", "Surowce", "Historia Operacji"])
@@ -246,7 +240,7 @@ elif menu == "Moduł Production":
                     st.success("Produkcja została pomyślnie zaksięgowana.")
                     st.rerun()
         else:
-            st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
+            st.error("Brak wystarczających surowców na pfłną rolkę Jumbo.")
 
     with tab2:
         st.subheader("Konfekcja (Rozkrój bez odpadu)")
@@ -312,6 +306,9 @@ elif menu == "Przyjęcie Towaru (PZ)":
                 st.success("Zapisano przyjęcie zewnętrzne.")
                 st.rerun()
 
+# ------------------------------------------------------------------
+# MODUŁ WZ: BEZPOŚREDNIE ODŚWIEŻANIE FORMULARZA I SEKTA ZAPISU PDF NA GÓRZE
+# ------------------------------------------------------------------
 elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
@@ -319,16 +316,19 @@ elif menu == "Wydanie Towaru (WZ)":
     if "wz_koszyk" not in st.session_state:
         st.session_state.wz_koszyk = []
     
+    # SYSTEM POBIERANIA: Wyświetla się na górze, gdy dokument jest gotowy, ale nie blokuje ponownego wpisywania!
     if "wygenerowane_pdf" in st.session_state:
-        st.success("Transakcja zaksięgowana. Dokument gotowy do pobrania.")
-        c1, c2 = st.columns(2)
-        c1.download_button("Pobierz dokument WZ (.pdf)", data=st.session_state.wygenerowane_pdf, file_name=st.session_state.nazwa_pliku_wz, mime="application/pdf", use_container_width=True)
-        if c2.button("Wystaw nowy dokument WZ", use_container_width=True):
-            del st.session_state.wygenerowane_pdf
-            del st.session_state.nazwa_pliku_wz
-            st.rerun()
-            
-    elif not odbiorcy:
+        st.success(f"Zaksięgowano dokument: {st.session_state.nazwa_pliku_wz}")
+        st.download_button(
+            label="Pobierz dokument WZ (.pdf)", 
+            data=st.session_state.wygenerowane_pdf, 
+            file_name=st.session_state.nazwa_pliku_wz, 
+            mime="application/pdf", 
+            use_container_width=True
+        )
+        st.divider()
+        
+    if not odbiorcy:
         st.warning("Brak odbiorców w bazie danych CRM.")
     else:
         dostepne_produkty = st.session_state.produkty[st.session_state.produkty["Stan"] > 0].copy()
@@ -361,7 +361,7 @@ elif menu == "Wydanie Towaru (WZ)":
                     opcje_map[label] = (r["Wariant"], efektywny_stan)
             
             if not opcje_list:
-                st.info("Wszystkie dostępne produkty zostały już dodane do listy wydania na dole strony.")
+                st.info("Wszystkie dostępne produkty zostały już rozdysponowane.")
             else:
                 col_p1, col_p2, col_p3 = st.columns([3, 1, 1])
                 with col_p1:
@@ -489,9 +489,11 @@ elif menu == "Wydanie Towaru (WZ)":
                         pdf.set_x(135)
                         pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
                         
-                        st.session_state.wz_koszyk = []
+                        # Automatyczne czyszczenie i odświeżanie do nowego dokumentu
                         st.session_state.wygenerowane_pdf = bytes(pdf.output())
                         st.session_state.nazwa_pliku_wz = f"{nr_wz_auto.replace('/', '_')}.pdf"
+                        st.session_state.wz_counter = st.session_state.wz_counter
+                        st.session_state.wz_koszyk = []
                         st.rerun()
 
 elif menu == "Panel Administracyjny":
