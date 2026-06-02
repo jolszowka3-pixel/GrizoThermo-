@@ -24,8 +24,8 @@ def pobierz_czcionki():
 # ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
 # ==========================================
-if 'init_v6' not in st.session_state:
-    st.session_state.init_v6 = True
+if 'init_v7' not in st.session_state:
+    st.session_state.init_v7 = True
     
     st.session_state.wz_counter = 1
     
@@ -203,7 +203,7 @@ if menu == "Pulpit Główny":
 # ZAKŁADKA 2: PRODUKCJA 
 # ------------------------------------------
 elif menu == "Moduł Produkcji":
-    st.header("Zarządzanie Producją: GrizoThermo+")
+    st.header("Zarządzanie Produkcją: GrizoThermo+")
     
     tab_kalk, tab_zlecenie = st.tabs(["Kalkulator Potencjału", "Zlecenie Produkcji"])
     wybrany_wariant = "GrizoThermo+ (1,15m x 13mb)"
@@ -245,7 +245,7 @@ elif menu == "Moduł Produkcji":
                 st.rerun()
 
 # ------------------------------------------
-# ZAKŁADKA 3: OPERACJE MAGAZYNOWE (PROFESJONALNY GENERATOR PDF)
+# ZAKŁADKA 3: OPERACJE MAGAZYNOWE (GENERATOR PDF)
 # ------------------------------------------
 elif menu == "Operacje Magazynowe (PZ/WZ)":
     st.header("Zarządzanie Zapasami (PZ/WZ)")
@@ -303,8 +303,6 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                     stan_obecny = st.session_state.produkty[st.session_state.produkty["Wariant"] == wybrany_prod]["Stan"].values[0]
                     st.caption(f"Dostępne na magazynie: {stan_obecny} szt.")
                     ilosc_wz = st.number_input("Ilość do wydania", min_value=1, max_value=int(stan_obecny) if stan_obecny > 0 else 1)
-                    
-                    cena_jednostkowa = st.number_input("Cena jednostkowa netto (PLN)", min_value=0.01, value=150.00, step=5.0)
                     uwagi_doc = st.text_input("Uwagi do dokumentu", value="Dostawa z magazynu głównego.")
 
                 if st.form_submit_button("Zatwierdź i Wystaw PDF"):
@@ -318,13 +316,7 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         
                         st.session_state.wz_counter += 1
                         
-                        # KALKULACJE FINANSOWE
-                        wartosc_netto = ilosc_wz * cena_jednostkowa
-                        stawka_vat = 23
-                        kwota_vat = wartosc_netto * 0.23
-                        wartosc_brutto = wartosc_netto + kwota_vat
-                        
-                        # INICJALIZACJA I BUDOWA PDF DOKŁADNIE WEDŁUG WZORU
+                        # INICJALIZACJA I BUDOWA PDF DOKŁADNIE WEDŁUG WZORU ILOŚCIOWEGO
                         font_path, font_bold_path = pobierz_czcionki()
                         wystawiono_miejscowosc = "Katowice"
                         
@@ -375,70 +367,29 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         najnizszy_y = max(y_koniec_sprzedawcy, pdf.get_y()) + 12
                         pdf.set_y(najnizszy_y)
                         
-                        # 3. Sekcja tabeli głównej (POZYCJE)
+                        # 3. Sekcja tabeli głównej (POZYCJE - TYLKO ILOŚCIOWE)
                         pdf.set_font("Roboto", "B", 10)
                         pdf.cell(190, 6, "POZYCJE", border=0, ln=1)
                         
                         # Szerokości kolumn (Suma = 190)
-                        w_lp = 8
-                        w_nazwa = 62
-                        w_ilosc = 15
-                        w_cena = 22
-                        w_wnetto = 25
-                        w_vat_proc = 12
-                        w_vated = 21
-                        w_wbrutto = 25
+                        w_lp = 15
+                        w_nazwa = 115
+                        w_ilosc = 30
+                        w_jm = 30
                         
-                        pdf.set_font("Roboto", "B", 8.5)
+                        pdf.set_font("Roboto", "B", 9)
                         pdf.cell(w_lp, 8, "LP", border=1, align='C')
-                        pdf.cell(w_nazwa, 8, "Nazwa towaru/usługi", border=1, align='L')
+                        pdf.cell(w_nazwa, 8, "Nazwa asortymentu", border=1, align='L')
                         pdf.cell(w_ilosc, 8, "Ilość", border=1, align='C')
-                        pdf.cell(w_cena, 8, "Cena netto", border=1, align='R')
-                        pdf.cell(w_wnetto, 8, "Wartość netto", border=1, align='R')
-                        pdf.cell(w_vat_proc, 8, "VAT", border=1, align='C')
-                        pdf.cell(w_vated, 8, "Wartość VAT", border=1, align='R')
-                        pdf.cell(w_wbrutto, 8, "Wartość brutto", border=1, align='R', ln=1)
+                        pdf.cell(w_jm, 8, "Jm.", border=1, align='C', ln=1)
                         
                         # Wiersz z produktem
                         pdf.set_font("Roboto", "", 9)
                         pdf.cell(w_lp, 8, "1", border=1, align='C')
                         pdf.cell(w_nazwa, 8, wybrany_prod, border=1, align='L')
-                        pdf.cell(w_ilosc, 8, f"{ilosc_wz} szt.", border=1, align='C')
-                        pdf.cell(w_cena, 8, f"{cena_jednostkowa:.2f}", border=1, align='R')
-                        pdf.cell(w_wnetto, 8, f"{wartosc_netto:.2f}", border=1, align='R')
-                        pdf.cell(w_vat_proc, 8, f"{stawka_vat}%", border=1, align='C')
-                        pdf.cell(w_vated, 8, f"{kwota_vat:.2f}", border=1, align='R')
-                        pdf.cell(w_wbrutto, 8, f"{wartosc_brutto:.2f}", border=1, align='R', ln=1)
-                        pdf.ln(6)
-                        
-                        # 4. Sekcja PODSUMOWANIE
-                        pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(190, 6, "PODSUMOWANIE", border=0, ln=1)
-                        
-                        # Tabela rozbicia stawek (przesunięta w prawo)
-                        pdf.set_x(65)
-                        pdf.set_font("Roboto", "B", 8.5)
-                        pdf.cell(32, 6, "Wartość netto", border=1, align='R')
-                        pdf.cell(25, 6, "Stawka VAT", border=1, align='C')
-                        pdf.cell(32, 6, "VAT", border=1, align='R')
-                        pdf.cell(36, 6, "Wartość brutto", border=1, align='R', ln=1)
-                        
-                        pdf.set_x(65)
-                        pdf.set_font("Roboto", "", 9)
-                        pdf.cell(32, 6, f"{wartosc_netto:.2f}", border=1, align='R')
-                        pdf.cell(25, 6, f"{stawka_vat}%", border=1, align='C')
-                        pdf.cell(32, 6, f"{kwota_vat:.2f}", border=1, align='R')
-                        pdf.cell(36, 6, f"{wartosc_brutto:.2f}", border=1, align='R', ln=1)
-                        
-                        # Wiersz RAZEM
-                        pdf.set_x(40)
-                        pdf.set_font("Roboto", "B", 9)
-                        pdf.cell(25, 6, "Razem:", border=0, align='R')
-                        pdf.cell(32, 6, f"{wartosc_netto:.2f} PLN", border=1, align='R')
-                        pdf.cell(25, 6, "", border=1)
-                        pdf.cell(32, 6, f"{kwota_vat:.2f} PLN", border=1, align='R')
-                        pdf.cell(36, 6, f"{wartosc_brutto:.2f} PLN", border=1, align='R', ln=1)
-                        pdf.ln(4)
+                        pdf.cell(w_ilosc, 8, str(ilosc_wz), border=1, align='C')
+                        pdf.cell(w_jm, 8, "szt.", border=1, align='C', ln=1)
+                        pdf.ln(8)
                         
                         # Uwagi
                         if uwagi_doc.strip():
@@ -447,7 +398,7 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                             pdf.set_font("Roboto", "", 9)
                             pdf.cell(0, 5, uwagi_doc.strip(), border=0, ln=1)
                         
-                        # 5. Podpisy (Dół strony)
+                        # 4. Podpisy (Dół strony)
                         pdf.ln(25)
                         pdf.set_font("Roboto", "", 8.5)
                         pdf.cell(95, 5, "......................................................................", border=0, align='C', ln=0)
