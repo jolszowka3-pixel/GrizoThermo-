@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 
 # Konfiguracja strony
-st.set_page_config(page_title="MRP GrizoThermo+", layout="wide")
+st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
 
 # ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
@@ -45,58 +45,68 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
+# Profesjonalne, stonowane kolory dla trybu Dark Mode
 def koloruj_status(val):
     if isinstance(val, str):
-        if 'MAŁO!' in val:
-            return 'color: #ff4b4b; font-weight: bold; background-color: #ffe6e6;'
-        elif 'OK' in val:
-            return 'color: #00c04b; font-weight: bold;'
+        if 'Niski stan' in val:
+            return 'color: #ff6b6b; font-weight: 500;' # Stonowany pastelowy czerwony
+        elif 'W normie' in val:
+            return 'color: #81c784; font-weight: 400;' # Stonowany pastelowy zielony
     return ''
 
+# Dodanie niestandardowego CSS dla jeszcze czystszego wyglądu (ukrycie górnego marginesu)
+st.markdown("""
+    <style>
+        .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+        .stTabs [data-baseweb="tab-list"] { gap: 24px; }
+        .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: transparent; border-radius: 4px 4px 0px 0px; gap: 1px; padding-top: 10px; padding-bottom: 10px; }
+    </style>
+""", unsafe_allow_html=True)
+
 # ==========================================
-# MENU GŁÓWNE BZCZNE (SIDEBAR)
+# MENU GŁÓWNE BOCZNE (SIDEBAR)
 # ==========================================
 st.sidebar.title("Nawigacja")
 
 opcje_menu = [
-    "📊 Pulpit", 
-    "⚙️ Produkcja", 
-    "🚚 Operacje Magazynowe (PZ/WZ)"
+    "Pulpit Magazynowy", 
+    "Moduł Produkcji", 
+    "Operacje Magazynowe (PZ/WZ)"
 ]
 
 st.sidebar.divider()
-is_admin = st.sidebar.checkbox("🔐 Odblokuj tryb Admina")
+is_admin = st.sidebar.checkbox("Tryb administratora")
 
 if is_admin:
-    opcje_menu.append("🛠️ Panel Admina")
+    opcje_menu.append("Panel Administracyjny")
 
 menu = st.sidebar.radio("Wybierz moduł:", opcje_menu)
 
 # ------------------------------------------
-# ZAKŁADKA 1: PULPIT I STANY (Z ZAKŁADKAMI)
+# ZAKŁADKA 1: PULPIT I STANY
 # ------------------------------------------
-if menu == "📊 Pulpit":
-    st.header("📊 Aktualne Stany Magazynowe")
+if menu == "Pulpit Magazynowy":
+    st.header("Aktualne Stany Magazynowe")
     
-    # Tworzenie poziomych zakładek wewnątrz pulpitu
-    tab_prod, tab_komp, tab_hist = st.tabs(["📦 Wyroby Gotowe", "🧱 Surowce (Komponenty)", "📝 Historia Operacji"])
+    tab_prod, tab_komp, tab_hist = st.tabs(["Wyroby Gotowe", "Surowce i Komponenty", "Historia Operacji"])
     
     with tab_prod:
-        st.subheader("Stan magazynu gotowych mat")
+        st.subheader("Stan magazynu produktów gotowych")
         st.dataframe(
             st.session_state.produkty, 
             use_container_width=True, 
             hide_index=True,
             column_config={
-                "Wariant": st.column_config.TextColumn("Wariant Maty", width="large"),
-                "Stan": st.column_config.NumberColumn("Sztuk na magazynie", format="%d 📦")
+                "Wariant": st.column_config.TextColumn("Wariant Produktu", width="large"),
+                "Stan": st.column_config.NumberColumn("Sztuk na stanie", format="%d")
             }
         )
     
     with tab_komp:
         st.subheader("Stan magazynu surowców")
         df_k = st.session_state.komponenty.copy()
-        df_k["Status"] = df_k.apply(lambda row: "⚠️ MAŁO!" if row["Stan"] <= row["Min_Stan"] else "✅ OK", axis=1)
+        # Zmiana tekstów na bardziej profesjonalne
+        df_k["Status"] = df_k.apply(lambda row: "Niski stan" if row["Stan"] <= row["Min_Stan"] else "W normie", axis=1)
         
         styled_df_k = df_k.style.map(koloruj_status, subset=['Status'])
         
@@ -108,7 +118,7 @@ if menu == "📊 Pulpit":
                 "ID": st.column_config.TextColumn("ID", width="small"),
                 "Nazwa": st.column_config.TextColumn("Nazwa Surowca", width="medium"),
                 "Stan": st.column_config.NumberColumn("Stan", format="%.2f"),
-                "Min_Stan": None  # Ukrywamy dla czytelności
+                "Min_Stan": None 
             }
         )
         
@@ -129,11 +139,10 @@ if menu == "📊 Pulpit":
 # ------------------------------------------
 # ZAKŁADKA 2: PRODUKCJA 
 # ------------------------------------------
-elif menu == "⚙️ Produkcja":
-    st.header("⚙️ Produkcja: GrizoThermo+")
+elif menu == "Moduł Produkcji":
+    st.header("Zarządzanie Produkcją: GrizoThermo+")
     
-    # Zakładki dla produkcji - oddzielamy podgląd od formularza
-    tab_kalk, tab_zlecenie = st.tabs(["🧮 Kalkulator Potencjału", "✅ Zlecenie Produkcji"])
+    tab_kalk, tab_zlecenie = st.tabs(["Kalkulator Potencjału", "Zlecenie Produkcji"])
     
     wybrany_wariant = "GrizoThermo+ (1,15m x 13mb)"
     
@@ -148,26 +157,27 @@ elif menu == "⚙️ Produkcja":
     max_rolek = min(potencjal_alu, potencjal_bialy, potencjal_zielony)
 
     with tab_kalk:
-        st.write("### Z obecnych stanów magazynowych możemy wykonać:")
+        st.write("#### Prognoza produkcji na podstawie obecnych stanów magazynowych")
         col1, col2, col3 = st.columns(3)
-        col1.metric("Zapas: Aluminium", f"{potencjal_alu} rolek")
-        col2.metric("Zapas: Barw. biały", f"{potencjal_bialy} rolek")
-        col3.metric("Zapas: Barw. zielony", f"{potencjal_zielony} rolek")
+        col1.metric("Zapas: Aluminium", f"{potencjal_alu} szt.")
+        col2.metric("Zapas: Barw. biały", f"{potencjal_bialy} szt.")
+        col3.metric("Zapas: Barw. zielony", f"{potencjal_zielony} szt.")
         
+        st.divider()
         if max_rolek > 0:
-            st.success(f"🚀 Maksymalnie jesteśmy w stanie wyprodukować: **{max_rolek} rolek**.")
+            st.info(f"Maksymalny możliwy wolumen produkcji: {max_rolek} szt.")
         else:
-            st.error("❌ Brak wystarczającej ilości surowców do uruchomienia produkcji!")
+            st.warning("Brak wystarczającej ilości surowców do uruchomienia partii.")
 
     with tab_zlecenie:
-        st.subheader("Zatwierdź nową partię")
+        st.subheader("Rejestracja wykonanej produkcji")
         with st.form("produkcja_form"):
-            ile_produkujemy = st.number_input("Ile rolek wyprodukowano?", min_value=1, max_value=max_rolek if max_rolek > 0 else 1, value=1 if max_rolek > 0 else 0)
+            ile_produkujemy = st.number_input("Wprowadź ilość wyprodukowanych rolek", min_value=1, max_value=max_rolek if max_rolek > 0 else 1, value=1 if max_rolek > 0 else 0)
             
-            if st.form_submit_button("Zaksięguj Produkcję", disabled=(max_rolek == 0)):
+            if st.form_submit_button("Zatwierdź i zaksięguj produkcję", disabled=(max_rolek == 0)):
                 idx_prod = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == wybrany_wariant][0]
                 st.session_state.produkty.at[idx_prod, "Stan"] += ile_produkujemy
-                dodaj_ruch("PW", "Wewn.", wybrany_wariant, ile_produkujemy, "Hala Produkcyjna")
+                dodaj_ruch("PW", "Dok. Wewnętrzny", wybrany_wariant, ile_produkujemy, "Hala Produkcyjna")
                 
                 receptura = st.session_state.receptury[st.session_state.receptury["Wariant"] == wybrany_wariant]
                 for _, wiersz in receptura.iterrows():
@@ -177,66 +187,64 @@ elif menu == "⚙️ Produkcja":
                     idx_komp = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == id_komp][0]
                     st.session_state.komponenty.at[idx_komp, "Stan"] -= zuzycie_laczne
                     nazwa_komp = st.session_state.komponenty.at[idx_komp, "Nazwa"]
-                    dodaj_ruch("RW", "Wewn.", nazwa_komp, zuzycie_laczne, "Hala Produkcyjna")
+                    dodaj_ruch("RW", "Dok. Wewnętrzny", nazwa_komp, zuzycie_laczne, "Hala Produkcyjna")
                 
-                st.success(f"Udana produkcja! Zaksięgowano {ile_produkujemy} rolek.")
+                st.success(f"Proces zakończony. Zaksięgowano wyprodukowanie {ile_produkujemy} szt.")
                 st.rerun()
 
 # ------------------------------------------
 # ZAKŁADKA 3: OPERACJE MAGAZYNOWE (PZ / WZ)
 # ------------------------------------------
-elif menu == "🚚 Operacje Magazynowe (PZ/WZ)":
-    st.header("🚚 Ruchy Magazynowe")
+elif menu == "Operacje Magazynowe (PZ/WZ)":
+    st.header("Zarządzanie Zapasami (PZ/WZ)")
     
-    # PZ i WZ jako osobne, czyste zakładki
-    tab_pz, tab_wz = st.tabs(["📥 Przyjęcie Surowców (PZ)", "📤 Wydanie Mat (WZ)"])
+    tab_pz, tab_wz = st.tabs(["Przyjęcie Zewnętrzne (PZ)", "Wydanie Zewnętrzne (WZ)"])
     
     with tab_pz:
-        st.subheader("Rejestracja nowej dostawy")
+        st.subheader("Rejestracja nowej dostawy surowców")
         with st.form("pz_form"):
-            nr_doc = st.text_input("Numer dokumentu (np. FV, nr zamówienia)")
+            nr_doc = st.text_input("Numer dokumentu (np. nr faktury, WZ dostawcy)")
             dostawca = st.text_input("Nazwa dostawcy")
-            wybrany_komp = st.selectbox("Wybierz surowiec", st.session_state.komponenty["Nazwa"].tolist())
-            ilosc = st.number_input("Ilość przyjęta (w jednostce surowca)", min_value=0.1, value=100.0)
+            wybrany_komp = st.selectbox("Wybierz przyjmowany surowiec", st.session_state.komponenty["Nazwa"].tolist())
+            ilosc = st.number_input("Ilość przyjmowana (zgodnie z jm.)", min_value=0.1, value=100.0)
             
-            if st.form_submit_button("Zatwierdź Przyjęcie (PZ)"):
+            if st.form_submit_button("Zatwierdź dokument PZ"):
                 idx = st.session_state.komponenty.index[st.session_state.komponenty["Nazwa"] == wybrany_komp][0]
                 st.session_state.komponenty.at[idx, "Stan"] += ilosc
                 dodaj_ruch("PZ", nr_doc, wybrany_komp, ilosc, dostawca)
-                st.success("Zapisano przyjęcie towaru na magazyn!")
+                st.success("Dokument PZ został pomyślnie zapisany w systemie.")
                 st.rerun()
 
     with tab_wz:
-        st.subheader("Wydanie gotowych produktów do klienta")
+        st.subheader("Wydanie produktów do klienta")
         with st.form("wz_form"):
-            nr_doc_wz = st.text_input("Numer dokumentu (np. FV, WZ)", key="wz_doc")
-            klient = st.text_input("Nazwa klienta")
-            wybrany_prod = st.selectbox("Wybierz wariant do wydania", st.session_state.produkty["Wariant"].tolist())
+            nr_doc_wz = st.text_input("Numer dokumentu (np. nr zamówienia, WZ)", key="wz_doc")
+            klient = st.text_input("Nazwa klienta / Odbiorca")
+            wybrany_prod = st.selectbox("Wybierz asortyment", st.session_state.produkty["Wariant"].tolist())
             
             stan_obecny = st.session_state.produkty[st.session_state.produkty["Wariant"] == wybrany_prod]["Stan"].values[0]
-            st.info(f"Dostępne na magazynie gotowym: **{stan_obecny} rolek**")
+            st.caption(f"Dostępne na magazynie: {stan_obecny} szt.")
             
-            ilosc_wz = st.number_input("Ilość rolek do wydania", min_value=1, max_value=int(stan_obecny) if stan_obecny > 0 else 1)
+            ilosc_wz = st.number_input("Ilość do wydania", min_value=1, max_value=int(stan_obecny) if stan_obecny > 0 else 1)
             
-            if st.form_submit_button("Zatwierdź Wydanie (WZ)"):
+            if st.form_submit_button("Zatwierdź dokument WZ"):
                 if ilosc_wz <= stan_obecny:
                     idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == wybrany_prod][0]
                     st.session_state.produkty.at[idx, "Stan"] -= ilosc_wz
                     dodaj_ruch("WZ", nr_doc_wz, wybrany_prod, ilosc_wz, klient)
-                    st.success("Zapisano wydanie towaru!")
+                    st.success("Dokument WZ został pomyślnie zapisany w systemie.")
                     st.rerun()
                 else:
-                    st.error("Błąd: Próbujesz wydać więcej rolek, niż znajduje się na magazynie!")
+                    st.error("Odrzucono: Niewystarczająca ilość asortymentu na magazynie.")
 
 # ------------------------------------------
 # ZAKŁADKA 4: PANEL ADMINA
 # ------------------------------------------
-elif menu == "🛠️ Panel Admina":
-    st.header("🛠️ Ręczna korekta stanów magazynowych")
-    st.info("💡 Tylko kolumny **Stan Aktualny** są edytowalne. Kliknij dwukrotnie wartość, wpisz poprawną i zatwierdź przyciskiem ZAPISZ.")
+elif menu == "Panel Administracyjny":
+    st.header("Narzędzia Administracyjne")
+    st.caption("Instrukcja: Edycja wartości w kolumnie 'Stan Aktualny' odbywa się poprzez dwukrotne kliknięcie. Zatwierdź operację przyciskiem na dole tabeli.")
     
-    # Osobne zakładki dla edycji, żeby zachować porządek
-    tab_korekt_surowce, tab_korekt_prod = st.tabs(["🧱 Korekta Surowców", "📦 Korekta Wyrobów Gotowych"])
+    tab_korekt_surowce, tab_korekt_prod = st.tabs(["Korekta Surowców", "Korekta Wyrobów Gotowych"])
     
     with tab_korekt_surowce:
         zmienione_komponenty = st.data_editor(
@@ -249,14 +257,14 @@ elif menu == "🛠️ Panel Admina":
                 "Nazwa": st.column_config.TextColumn("Nazwa Surowca", disabled=True),
                 "Jednostka": st.column_config.TextColumn("Jm.", disabled=True),
                 "Min_Stan": st.column_config.NumberColumn("Min. Stan (Alarm)", disabled=True),
-                "Stan": st.column_config.NumberColumn("Stan Aktualny ✏️", format="%.2f", required=True)
+                "Stan": st.column_config.NumberColumn("Stan Aktualny", format="%.2f", required=True)
             }
         )
         
-        if st.button("💾 Zapisz nowe stany surowców"):
+        if st.button("Zapisz korektę surowców"):
             st.session_state.komponenty = zmienione_komponenty
-            dodaj_ruch("KOREKTA", "Admin", "Wiele surowców", 0, "Aktualizacja ręczna")
-            st.success("Zaktualizowano stany surowców!")
+            dodaj_ruch("KOREKTA", "SYS_ADMIN", "Aktualizacja zbiorcza", 0, "-")
+            st.success("Baza surowców została zaktualizowana.")
             st.rerun()
 
     with tab_korekt_prod:
@@ -267,12 +275,12 @@ elif menu == "🛠️ Panel Admina":
             use_container_width=True,
             column_config={
                 "Wariant": st.column_config.TextColumn("Wariant Maty", disabled=True),
-                "Stan": st.column_config.NumberColumn("Stan Aktualny (Sztuki) ✏️", required=True, step=1)
+                "Stan": st.column_config.NumberColumn("Stan Aktualny", required=True, step=1)
             }
         )
         
-        if st.button("💾 Zapisz nowe stany produktów"):
+        if st.button("Zapisz korektę produktów"):
             st.session_state.produkty = zmienione_produkty
-            dodaj_ruch("KOREKTA", "Admin", "Wiele produktów", 0, "Aktualizacja ręczna")
-            st.success("Zaktualizowano stany wyrobów gotowych!")
+            dodaj_ruch("KOREKTA", "SYS_ADMIN", "Aktualizacja zbiorcza", 0, "-")
+            st.success("Baza produktów została zaktualizowana.")
             st.rerun()
