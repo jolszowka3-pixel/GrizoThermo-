@@ -35,8 +35,8 @@ def pobierz_czcionki():
 # ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
 # ==========================================
-if 'init_v11' not in st.session_state:
-    st.session_state.init_v11 = True
+if 'init_v12' not in st.session_state:
+    st.session_state.init_v12 = True
     
     st.session_state.wz_counter = 1
     
@@ -95,23 +95,33 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-def koloruj_status(val):
-    if isinstance(val, str):
-        if 'Niski stan' in val:
-            return 'color: #d32f2f; font-weight: 600;' 
-        elif 'W normie' in val:
-            return 'color: #2e7d32; font-weight: 500;' 
-    return ''
-
-# CSS
+# CSS (Z nowymi stylami dla kafelków)
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
         .stTabs [data-baseweb="tab-list"] { gap: 24px; }
         .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: transparent; border-radius: 4px 4px 0px 0px; gap: 1px; padding-top: 10px; padding-bottom: 10px; }
+        
         .big-metric { font-size: 4rem; font-weight: 700; margin: 0; padding: 0; line-height: 1.2; text-align: center; }
         .big-metric-label { font-size: 1.2rem; color: #6c757d; text-align: center; margin-bottom: 1rem; font-weight: 500; }
         .metric-card { background-color: #ffffff; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e9ecef; }
+        
+        /* NOWE STYLE DLA ELEMENTÓW MAGAZYNU (MNIEJ TECHNICZNE) */
+        .item-card { background-color: #ffffff; border-radius: 8px; padding: 18px 24px; margin-bottom: 16px; border: 1px solid #e9ecef; box-shadow: 0 2px 5px rgba(0,0,0,0.02); display: flex; justify-content: space-between; align-items: center; border-left: 4px solid #205493; }
+        .item-card-alert { border-left: 4px solid #d32f2f; } /* Czerwony pasek dla braków */
+        .item-card-ok { border-left: 4px solid #2e7d32; } /* Zielony pasek dla dobrych stanów */
+        
+        .item-info { display: flex; flex-direction: column; }
+        .item-title { font-size: 1.15rem; font-weight: 600; color: #212529; margin: 0; padding: 0; }
+        .item-subtitle { font-size: 0.9rem; color: #6c757d; margin-top: 4px; display: flex; align-items: center; gap: 8px; }
+        
+        .item-value-box { text-align: right; }
+        .item-value { font-size: 1.6rem; font-weight: 700; color: #212529; margin: 0; padding: 0; }
+        .item-unit { font-size: 1rem; color: #6c757d; font-weight: 500; }
+        
+        .badge-ok { background-color: #e8f5e9; color: #2e7d32; padding: 3px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; }
+        .badge-alert { background-color: #ffebee; color: #c62828; padding: 3px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; }
+        
     </style>
 """, unsafe_allow_html=True)
 
@@ -169,7 +179,7 @@ if uprawnienia.get("admin", False):
 menu = st.sidebar.radio("Wybierz moduł:", opcje_menu)
 
 # ------------------------------------------
-# ZAKŁADKA 1: PULPIT GŁÓWNY
+# ZAKŁADKA 1: PULPIT GŁÓWNY (Z KAFELKAMI)
 # ------------------------------------------
 if menu == "Pulpit Główny":
     st.header("Pulpit Zarządzania: GrizoThermo+")
@@ -202,17 +212,59 @@ if menu == "Pulpit Główny":
 
     st.write("")
     st.divider()
-    st.write("#### Szczegóły magazynowe")
-
+    
     tab_prod, tab_komp, tab_hist = st.tabs(["Wyroby Gotowe", "Surowce i Komponenty", "Historia Operacji"])
     
+    # ------------------
+    # WYROBY GOTOWE - KAFELKI
+    # ------------------
     with tab_prod:
-        st.dataframe(st.session_state.produkty, use_container_width=True, hide_index=True)
+        st.write("#### Lista Asortymentu")
+        for index, row in st.session_state.produkty.iterrows():
+            html_produkt = f"""
+            <div class="item-card">
+                <div class="item-info">
+                    <p class="item-title">📦 {row['Wariant']}</p>
+                    <p class="item-subtitle">Kategoria: Wyroby gotowe do sprzedaży</p>
+                </div>
+                <div class="item-value-box">
+                    <p class="item-value">{int(row['Stan'])} <span class="item-unit">szt.</span></p>
+                </div>
+            </div>
+            """
+            st.markdown(html_produkt, unsafe_allow_html=True)
+
+    # ------------------
+    # SUROWCE - KAFELKI Z ETYKIETAMI
+    # ------------------
     with tab_komp:
-        df_k = st.session_state.komponenty.copy()
-        df_k["Status"] = df_k.apply(lambda row: "Niski stan" if row["Stan"] <= row["Min_Stan"] else "W normie", axis=1)
-        st.dataframe(df_k.style.map(koloruj_status, subset=['Status']), use_container_width=True, hide_index=True)
+        st.write("#### Magazyn Komponentów")
+        for index, row in st.session_state.komponenty.iterrows():
+            jest_malo = row['Stan'] <= row['Min_Stan']
+            klasa_karty = "item-card-alert" if jest_malo else "item-card-ok"
+            badge = f'<span class="badge-alert">⚠️ Poniżej minimum (Min: {row["Min_Stan"]})</span>' if jest_malo else f'<span class="badge-ok">✅ W normie (Min: {row["Min_Stan"]})</span>'
+            
+            # Formaty zapisu bez niepotrzebnych zer po przecinku
+            stan_format = f"{row['Stan']:g}"
+            
+            html_surowiec = f"""
+            <div class="item-card {klasa_karty}">
+                <div class="item-info">
+                    <p class="item-title">🧱 {row['Nazwa']} <span style="font-size: 0.8rem; color: #aaa; margin-left: 8px;">[{row['ID']}]</span></p>
+                    <p class="item-subtitle">{badge}</p>
+                </div>
+                <div class="item-value-box">
+                    <p class="item-value">{stan_format} <span class="item-unit">{row['Jednostka']}</span></p>
+                </div>
+            </div>
+            """
+            st.markdown(html_surowiec, unsafe_allow_html=True)
+
+    # ------------------
+    # HISTORIA - POZOSTAJE TABELĄ
+    # ------------------
     with tab_hist:
+        st.write("#### Dziennik Ruchów Magazynowych")
         st.dataframe(
             st.session_state.historia.sort_values(by="Data", ascending=False), 
             use_container_width=True, 
@@ -383,24 +435,20 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         pdf.add_font("Roboto", "", font_path)
                         pdf.add_font("Roboto", "B", font_bold_path)
                         
-                        # --- ELEGANCKI NAGŁÓWEK ---
-                        pdf.set_fill_color(240, 240, 240) # Jasnoszare tło tytułu
+                        pdf.set_fill_color(240, 240, 240)
                         pdf.set_font("Roboto", "B", 15)
                         pdf.cell(0, 12, f"WYDANIE ZEWNĘTRZNE (WZ) NR {nr_doc_wz}", border=0, ln=1, align='C', fill=True)
                         
-                        # Data i miejsce pod tytułem
                         pdf.set_font("Roboto", "", 9)
-                        pdf.set_text_color(100, 100, 100) # Szary tekst
+                        pdf.set_text_color(100, 100, 100)
                         data_aktualna = datetime.now().strftime("%Y-%m-%d")
                         pdf.cell(0, 6, f"Data wydania: {data_aktualna}   |   Miejsce wystawienia: {MOJA_FIRMA['miejscowosc_wystawienia']}", border=0, ln=1, align='R')
-                        pdf.set_text_color(0, 0, 0) # Powrót do czarnego
+                        pdf.set_text_color(0, 0, 0) 
                         pdf.ln(8)
                         
-                        # --- DANE KONTRAHENTÓW (IDEALNIE WYRÓWNANE KOLUMNY) ---
                         y_start = pdf.get_y()
                         
-                        # Lewa kolumna - Sprzedawca
-                        pdf.set_fill_color(248, 248, 248) # Bardzo jasny szary dla bloków
+                        pdf.set_fill_color(248, 248, 248)
                         pdf.set_font("Roboto", "B", 10)
                         pdf.cell(90, 7, "  SPRZEDAWCA / WYSTAWCA", border=0, ln=1, fill=True)
                         pdf.set_font("Roboto", "", 9)
@@ -408,7 +456,6 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         pdf.multi_cell(90, 5, firma_tekst, border=0)
                         y_left = pdf.get_y()
                         
-                        # Prawa kolumna - Nabywca
                         pdf.set_xy(105, y_start)
                         pdf.set_font("Roboto", "B", 10)
                         pdf.cell(90, 7, "  NABYWCA / ODBIORCA", border=0, ln=1, fill=True)
@@ -418,30 +465,25 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         pdf.multi_cell(90, 5, f"{wybrany_klient}\n{klient_adres}\n{nip_czysty}", border=0)
                         y_right = pdf.get_y()
                         
-                        # Ustawienie kursora pod dłuższą kolumną
                         pdf.set_y(max(y_left, y_right) + 12)
                         
-                        # --- TABELA ASORTYMENTU ---
                         pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(0, 8, "POZYCJE DOKUMENTU", border="B", ln=1) # Linia pod tytułem sekcji
+                        pdf.cell(0, 8, "POZYCJE DOKUMENTU", border="B", ln=1)
                         pdf.ln(3)
                         
-                        # Nagłówek tabeli z eleganckim tłem
-                        pdf.set_fill_color(230, 235, 245) # Lekki niebieskawo-szary
+                        pdf.set_fill_color(230, 235, 245)
                         pdf.set_font("Roboto", "B", 9)
                         pdf.cell(15, 8, "Lp.", border=1, align='C', fill=True)
                         pdf.cell(115, 8, "Nazwa asortymentu", border=1, align='L', fill=True)
                         pdf.cell(30, 8, "Ilość", border=1, align='C', fill=True)
                         pdf.cell(30, 8, "Jm.", border=1, align='C', ln=1, fill=True)
                         
-                        # Wiersz tabeli
                         pdf.set_font("Roboto", "", 9)
                         pdf.cell(15, 8, "1", border=1, align='C')
                         pdf.cell(115, 8, wybrany_prod, border=1, align='L')
                         pdf.cell(30, 8, str(ilosc_wz), border=1, align='C')
                         pdf.cell(30, 8, "szt.", border=1, align='C', ln=1)
                         
-                        # --- UWAGI ---
                         pdf.ln(10)
                         if uwagi_doc.strip():
                             pdf.set_font("Roboto", "B", 9)
@@ -449,24 +491,20 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                             pdf.set_font("Roboto", "", 9)
                             pdf.multi_cell(0, 5, uwagi_doc.strip(), border=0)
                         
-                        # --- PODPISY (IDEALNIE WYŚRODKOWANE) ---
                         pdf.ln(25)
                         y_sig = pdf.get_y()
                         
-                        # Lewy podpis
                         pdf.set_font("Roboto", "", 8.5)
                         pdf.set_xy(15, y_sig)
                         pdf.cell(60, 5, "..........................................................", align='C', ln=1)
                         pdf.set_x(15)
                         pdf.cell(60, 5, f"Wystawił: {st.session_state.aktualny_uzytkownik}", align='C')
                         
-                        # Prawy podpis
                         pdf.set_xy(135, y_sig)
                         pdf.cell(60, 5, "..........................................................", align='C', ln=1)
                         pdf.set_x(135)
                         pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
                         
-                        # Finalizacja PDF
                         pdf_bytes = bytes(pdf.output())
                         st.session_state.wygenerowane_pdf = pdf_bytes
                         safe_name = nr_doc_wz.replace('/', '_')
