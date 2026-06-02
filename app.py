@@ -24,8 +24,8 @@ def pobierz_czcionki():
 # ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
 # ==========================================
-if 'init_v8' not in st.session_state:
-    st.session_state.init_v8 = True
+if 'init_v9' not in st.session_state:
+    st.session_state.init_v9 = True
     
     st.session_state.wz_counter = 1
     
@@ -37,7 +37,6 @@ if 'init_v8' not in st.session_state:
         }
     }
     
-    # NOWA BAZA: KONTRAHENCI
     st.session_state.kontrahenci = pd.DataFrame([
         {"Nazwa": "Hurtownia Surowców ALUSTAR", "NIP": "1112223344", "Adres": "ul. Hutnicza 10, 40-001 Katowice", "Typ": "Dostawca"},
         {"Nazwa": "Chemia Przemysłowa Sp. z o.o.", "NIP": "9998887766", "Adres": "ul. Barwna 5, 01-234 Warszawa", "Typ": "Dostawca"},
@@ -152,6 +151,8 @@ if uprawnienia.get("produkcja", False):
     opcje_menu.append("Moduł Produkcji")
 if uprawnienia.get("magazyn", False):
     opcje_menu.append("Operacje Magazynowe (PZ/WZ)")
+    # Baza kontrahentów widoczna dla osób mających dostęp do PZ/WZ
+    opcje_menu.append("Baza Kontrahentów (CRM)")
 if uprawnienia.get("admin", False):
     opcje_menu.append("Panel Administracyjny")
 
@@ -258,7 +259,37 @@ elif menu == "Moduł Produkcji":
                 st.rerun()
 
 # ------------------------------------------
-# ZAKŁADKA 3: OPERACJE MAGAZYNOWE Z BAZĄ KONTRAHENTÓW
+# ZAKŁADKA 3: BAZA KONTRAHENTÓW (Wydzielona)
+# ------------------------------------------
+elif menu == "Baza Kontrahentów (CRM)":
+    st.header("Baza Kontrahentów (Klienci i Dostawcy)")
+    st.info("💡 **Aby dodać nową firmę**, przewiń na sam dół tabeli i kliknij w pusty wiersz. Możesz też usuwać firmy, zaznaczając je z lewej strony i wciskając klawisz Delete.")
+    
+    zmienieni_kontrahenci = st.data_editor(
+        st.session_state.kontrahenci,
+        key="edit_kontrahenci",
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Nazwa": st.column_config.TextColumn("Nazwa Firmy", required=True),
+            "NIP": st.column_config.TextColumn("Numer NIP", required=False),
+            "Adres": st.column_config.TextColumn("Pełny Adres", required=True),
+            "Typ": st.column_config.SelectboxColumn(
+                "Typ firmy",
+                help="Czy to firma od której kupujesz (Dostawca) czy taka, której sprzedajesz (Odbiorca)?",
+                options=["Dostawca", "Odbiorca"],
+                required=True
+            )
+        }
+    )
+    
+    if st.button("💾 Zapisz zmiany w Bazie Kontrahentów"):
+        st.session_state.kontrahenci = zmienieni_kontrahenci
+        st.success("Zaktualizowano bazę firm!")
+        st.rerun()
+
+# ------------------------------------------
+# ZAKŁADKA 4: OPERACJE MAGAZYNOWE (PZ / WZ)
 # ------------------------------------------
 elif menu == "Operacje Magazynowe (PZ/WZ)":
     st.header("Zarządzanie Zapasami (PZ/WZ)")
@@ -267,12 +298,10 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
     
     with tab_pz:
         st.subheader("Rejestracja nowej dostawy surowców")
-        
-        # Pobieranie listy dostawców z bazy
         dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]["Nazwa"].tolist()
         
         if not dostawcy:
-            st.warning("Brak dostawców w bazie! Dodaj ich w Panelu Administracyjnym.")
+            st.warning("Brak dostawców w bazie! Przejdź do zakładki 'Baza Kontrahentów (CRM)', aby ich dodać.")
         else:
             with st.form("pz_form"):
                 nr_doc = st.text_input("Numer dokumentu (np. nr faktury, WZ dostawcy)")
@@ -289,8 +318,6 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
 
     with tab_wz:
         st.subheader("Wydanie produktów do klienta (Generator PDF)")
-        
-        # Pobieranie listy odbiorców z bazy
         odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
         
         if "wygenerowane_pdf" in st.session_state:
@@ -311,12 +338,11 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                     st.rerun()
                     
         elif not odbiorcy:
-            st.warning("Brak odbiorców w bazie! Dodaj ich w Panelu Administracyjnym.")
+            st.warning("Brak odbiorców w bazie! Przejdź do zakładki 'Baza Kontrahentów (CRM)', aby ich dodać.")
         else:
             data_dzis_str = datetime.now().strftime("%Y/%m/%d")
             nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
             
-            # Wprowadzanie danych ze zintegrowaną bazą
             with st.form("wz_form"):
                 col_f1, col_f2 = st.columns(2)
                 with col_f1:
@@ -332,18 +358,15 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
 
                 if st.form_submit_button("Zatwierdź i Wystaw PDF"):
                     if ilosc_wz <= stan_obecny:
-                        # Pobieranie danych klienta do PDF
                         dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
                         klient_adres = dane_klienta["Adres"]
                         klient_nip = dane_klienta["NIP"]
                         
-                        # Aktualizacja bazy produktów
                         idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == wybrany_prod][0]
                         st.session_state.produkty.at[idx, "Stan"] -= ilosc_wz
                         dodaj_ruch("WZ", nr_doc_wz, wybrany_prod, ilosc_wz, wybrany_klient)
                         st.session_state.wz_counter += 1
                         
-                        # INICJALIZACJA I BUDOWA PDF
                         font_path, font_bold_path = pobierz_czcionki()
                         wystawiono_miejscowosc = "Katowice"
                         
@@ -352,7 +375,6 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         pdf.add_font("Roboto", "", font_path)
                         pdf.add_font("Roboto", "B", font_bold_path)
                         
-                        # Nagłówek
                         pdf.set_font("Roboto", "", 9)
                         data_aktualna = datetime.now().strftime("%Y-%m-%d")
                         pdf.cell(95, 5, f"Wystawiono dnia: {data_aktualna}, {wystawiono_miejscowosc}", border=0, ln=0)
@@ -361,7 +383,6 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         pdf.cell(95, 5, f"Wydanie Zewnętrzne nr {nr_doc_wz}", border=0, ln=1, align='R')
                         pdf.ln(12)
                         
-                        # Dwukolumnowy układ adresów
                         y_blok_stron = pdf.get_y()
                         
                         pdf.set_font("Roboto", "B", 10)
@@ -376,13 +397,12 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         pdf.set_font("Roboto", "", 9)
                         pdf.set_x(110)
                         
-                        nip_czysty = f"NIP: {klient_nip}" if klient_nip else ""
+                        nip_czysty = f"NIP: {klient_nip}" if pd.notna(klient_nip) and str(klient_nip).strip() else ""
                         pdf.multi_cell(95, 5, f"{wybrany_klient}\n{klient_adres}\n{nip_czysty}")
                         
                         najnizszy_y = max(y_koniec_sprzedawcy, pdf.get_y()) + 12
                         pdf.set_y(najnizszy_y)
                         
-                        # Tabela z pozycjami
                         pdf.set_font("Roboto", "B", 10)
                         pdf.cell(190, 6, "POZYCJE", border=0, ln=1)
                         
@@ -407,7 +427,6 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                             pdf.set_font("Roboto", "", 9)
                             pdf.cell(0, 5, uwagi_doc.strip(), border=0, ln=1)
                         
-                        # Podpisy
                         pdf.ln(25)
                         pdf.set_font("Roboto", "", 8.5)
                         pdf.cell(95, 5, "......................................................................", border=0, align='C', ln=0)
@@ -425,45 +444,17 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                         st.error("Odrzucono: Niewystarczająca ilość asortymentu na magazynie.")
 
 # ------------------------------------------
-# ZAKŁADKA 4: PANEL ADMINA
+# ZAKŁADKA 5: PANEL ADMINA
 # ------------------------------------------
 elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.get("admin", False):
     st.header("Narzędzia Administracyjne")
     
-    tab_kontrah, tab_uzytkownicy, tab_korekt_surowce, tab_korekt_prod = st.tabs([
-        "Baza Kontrahentów", "Konta Użytkowników", "Korekta Surowców", "Korekta Wyrobów Gotowych"
+    tab_uzytkownicy, tab_korekt_surowce, tab_korekt_prod = st.tabs([
+        "Konta Użytkowników", "Korekta Surowców", "Korekta Wyrobów Gotowych"
     ])
     
-    # --- NOWA ZAKŁADKA CRM (KONTRAHENCI) ---
-    with tab_kontrah:
-        st.subheader("Zarządzanie Bazą Firm (Dostawcy i Odbiorcy)")
-        st.info("💡 **Aby dodać nową firmę**, przewiń na sam dół tabeli i kliknij w pusty wiersz. Możesz też usuwać firmy zaznaczając je z lewej strony.")
-        
-        zmienieni_kontrahenci = st.data_editor(
-            st.session_state.kontrahenci,
-            key="edit_kontrahenci",
-            num_rows="dynamic",  # Pozwala na swobodne dodawanie i usuwanie rzędów!
-            use_container_width=True,
-            column_config={
-                "Nazwa": st.column_config.TextColumn("Nazwa Firmy", required=True),
-                "NIP": st.column_config.TextColumn("Numer NIP", required=False),
-                "Adres": st.column_config.TextColumn("Pełny Adres", required=True),
-                "Typ": st.column_config.SelectboxColumn(
-                    "Typ firmy",
-                    help="Czy to firma od której kupujesz (Dostawca) czy taka, której sprzedajesz (Odbiorca)?",
-                    options=["Dostawca", "Odbiorca"],
-                    required=True
-                )
-            }
-        )
-        
-        if st.button("Zapisz zmiany w Bazie Kontrahentów"):
-            st.session_state.kontrahenci = zmienieni_kontrahenci
-            st.success("Zaktualizowano bazę firm!")
-            st.rerun()
-    
     with tab_uzytkownicy:
-        st.subheader("Zarządzanie Dostępem")
+        st.subheader("Zarządzanie Dostępem i Uprawnieniami")
         lista_uzytkownikow = []
         for l, dane in st.session_state.uzytkownicy.items():
             lista_uzytkownikow.append({
@@ -487,7 +478,7 @@ elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.g
             with colB:
                 st.write("Wybierz uprawnienia dla konta:")
                 upr_produkcja = st.checkbox("Dostęp do Modułu Produkcji")
-                upr_magazyn = st.checkbox("Dostęp do Operacji Magazynowych (PZ/WZ)")
+                upr_magazyn = st.checkbox("Dostęp do Operacji Magazynowych (PZ/WZ) oraz CRM")
                 upr_admin = st.checkbox("Dostęp do Panelu Administracyjnego")
                 
             if st.form_submit_button("Utwórz konto"):
@@ -500,7 +491,11 @@ elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.g
                     st.session_state.uzytkownicy[nowy_login] = {
                         "haslo": nowe_haslo,
                         "imie": nowe_imie,
-                        "uprawnienia": {"produkcja": upr_produkcja, "magazyn": upr_magazyn, "admin": upr_admin}
+                        "uprawnienia": {
+                            "produkcja": upr_produkcja,
+                            "magazyn": upr_magazyn,
+                            "admin": upr_admin
+                        }
                     }
                     st.success(f"Pomyślnie utworzono nowe konto dla: {nowe_imie}!")
                     st.rerun()
