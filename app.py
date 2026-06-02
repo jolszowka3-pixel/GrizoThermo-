@@ -254,4 +254,25 @@ elif menu == "🛠️ Panel Admina":
         )
         
         if st.button("💾 Zapisz nowe stany surowców"):
-            st.
+            st.session_state.komponenty = zmienione_komponenty
+            dodaj_ruch("KOREKTA", "Admin", "Wiele surowców", 0, "Aktualizacja ręczna")
+            st.success("Zaktualizowano stany surowców!")
+            st.rerun()
+
+    with tab_korekt_prod:
+        zmienione_produkty = st.data_editor(
+            st.session_state.produkty, 
+            key="edit_prod", 
+            hide_index=True, 
+            use_container_width=True,
+            column_config={
+                "Wariant": st.column_config.TextColumn("Wariant Maty", disabled=True),
+                "Stan": st.column_config.NumberColumn("Stan Aktualny (Sztuki) ✏️", required=True, step=1)
+            }
+        )
+        
+        if st.button("💾 Zapisz nowe stany produktów"):
+            st.session_state.produkty = zmienione_produkty
+            dodaj_ruch("KOREKTA", "Admin", "Wiele produktów", 0, "Aktualizacja ręczna")
+            st.success("Zaktualizowano stany wyrobów gotowych!")
+            st.rerun()
