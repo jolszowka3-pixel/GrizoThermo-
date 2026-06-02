@@ -50,15 +50,24 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent):
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
 # ==========================================
-# MENU GŁÓWNE
+# MENU GŁÓWNE I PANEL ADMINA
 # ==========================================
 st.sidebar.title("Nawigacja")
-menu = st.sidebar.radio("Wybierz zakładkę:", [
+
+opcje_menu = [
     "📊 Pulpit & Stany", 
     "⚙️ Produkcja", 
     "📥 Przyjęcie towaru (PZ)", 
     "📤 Wydanie towaru (WZ)"
-])
+]
+
+st.sidebar.divider()
+is_admin = st.sidebar.checkbox("🔐 Odblokuj tryb Admina")
+
+if is_admin:
+    opcje_menu.append("🛠️ Panel Admina (Korekty)")
+
+menu = st.sidebar.radio("Wybierz zakładkę:", opcje_menu)
 
 # ------------------------------------------
 # ZAKŁADKA 1: PULPIT I STANY
@@ -181,3 +190,30 @@ elif menu == "📤 Wydanie towaru (WZ)":
                 st.rerun()
             else:
                 st.error("Błąd: Próbujesz wydać więcej rolek, niż znajduje się na magazynie!")
+
+# ------------------------------------------
+# ZAKŁADKA 5: PANEL ADMINA
+# ------------------------------------------
+elif menu == "🛠️ Panel Admina (Korekty)":
+    st.header("🛠️ Ręczna korekta stanów magazynowych")
+    st.info("💡 Kliknij dwukrotnie w komórkę w kolumnie 'Stan', aby ją edytować, a następnie kliknij przycisk zapisu.")
+    
+    st.subheader("1. Korekta Surowców")
+    zmienione_komponenty = st.data_editor(st.session_state.komponenty, key="edit_komp", hide_index=True, use_container_width=True)
+    
+    if st.button("💾 Zapisz nowe stany surowców"):
+        st.session_state.komponenty = zmienione_komponenty
+        dodaj_ruch("KOREKTA", "Admin", "Wiele surowców", 0, "Aktualizacja ręczna")
+        st.success("Zaktualizowano stany surowców!")
+        st.rerun()
+
+    st.divider()
+
+    st.subheader("2. Korekta Wyrobów Gotowych")
+    zmienione_produkty = st.data_editor(st.session_state.produkty, key="edit_prod", hide_index=True, use_container_width=True)
+    
+    if st.button("💾 Zapisz nowe stany produktów"):
+        st.session_state.produkty = zmienione_produkty
+        dodaj_ruch("KOREKTA", "Admin", "Wiele produktów", 0, "Aktualizacja ręczna")
+        st.success("Zaktualizowano stany wyrobów gotowych!")
+        st.rerun()
