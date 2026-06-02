@@ -11,16 +11,23 @@ st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
 if 'init' not in st.session_state:
     st.session_state.init = True
     
-    # Baza użytkowników (Zmieniony system ról)
+    # Baza użytkowników (System Granularnych Uprawnień)
     st.session_state.uzytkownicy = {
-        "admin": {"haslo": "admin123", "rola": "Admin", "imie": "Kierownik Magazynu"},
-        "jan": {"haslo": "hala123", "rola": "Pracownik", "imie": "Jan Kowalski"}
+        "admin": {
+            "haslo": "admin123", 
+            "imie": "Kierownik Magazynu",
+            "uprawnienia": {
+                "produkcja": True,
+                "magazyn": True,
+                "admin": True
+            }
+        }
     }
     
     # Status logowania
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
-    st.session_state.aktualna_rola = None
+    st.session_state.aktualne_uprawnienia = {}
     
     st.session_state.komponenty = pd.DataFrame([
         {"ID": "K01", "Nazwa": "Aluminium zbrojone 1,15m", "Stan": 3200.0, "Jednostka": "mb", "Min_Stan": 1000.0},
@@ -90,12 +97,11 @@ if not st.session_state.zalogowany:
             submit = st.form_submit_button("Zaloguj do systemu", use_container_width=True)
             
             if submit:
-                # Czyszczenie białych znaków (np. spacji na końcu loginu)
                 login_clean = login_input.strip()
                 if login_clean in st.session_state.uzytkownicy and st.session_state.uzytkownicy[login_clean]["haslo"] == haslo_input:
                     st.session_state.zalogowany = True
                     st.session_state.aktualny_uzytkownik = st.session_state.uzytkownicy[login_clean]["imie"]
-                    st.session_state.aktualna_rola = st.session_state.uzytkownicy[login_clean]["rola"]
+                    st.session_state.aktualne_uprawnienia = st.session_state.uzytkownicy[login_clean]["uprawnienia"]
                     st.rerun()
                 else:
                     st.error("Nieprawidłowy login lub hasło.")
@@ -107,27 +113,27 @@ if not st.session_state.zalogowany:
 # ==========================================
 st.sidebar.title("Nawigacja")
 
-st.sidebar.info(f"Zalogowano jako:\n**{st.session_state.aktualny_uzytkownik}**\nRola: {st.session_state.aktualna_rola}")
+st.sidebar.info(f"Zalogowano jako:\n**{st.session_state.aktualny_uzytkownik}**")
 if st.sidebar.button("🚪 Wyloguj", use_container_width=True):
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
-    st.session_state.aktualna_rola = None
+    st.session_state.aktualne_uprawnienia = {}
     st.rerun()
 
 st.sidebar.divider()
 
-# Generowanie menu w oparciu o rolę
-opcje_menu = ["Pulpit Magazynowy"] # Dostępne dla każdego
+# Generowanie menu w oparciu o przypisane uprawnienia
+opcje_menu = ["Pulpit Magazynowy"] # Dostępne dla każdego zalogowanego
 
-rola = st.session_state.aktualna_rola
+uprawnienia = st.session_state.aktualne_uprawnienia
 
-if rola in ["Admin", "Pracownik", "Produkcja"]:
+if uprawnienia.get("produkcja", False):
     opcje_menu.append("Moduł Produkcji")
 
-if rola in ["Admin", "Pracownik", "Magazynier"]:
+if uprawnienia.get("magazyn", False):
     opcje_menu.append("Operacje Magazynowe (PZ/WZ)")
 
-if rola == "Admin":
+if uprawnienia.get("admin", False):
     opcje_menu.append("Panel Administracyjny")
 
 menu = st.sidebar.radio("Wybierz moduł:", opcje_menu)
@@ -286,9 +292,9 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                     st.error("Odrzucono: Niewystarczająca ilość asortymentu na magazynie.")
 
 # ------------------------------------------
-# ZAKŁADKA 4: PANEL ADMINA (TYLKO DLA ADMINA)
+# ZAKŁADKA 4: PANEL ADMINA (TYLKO Z UPRAWNIENIEM)
 # ------------------------------------------
-elif menu == "Panel Administracyjny":
+elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.get("admin", False):
     st.header("Narzędzia Administracyjne")
     
     tab_uzytkownicy, tab_korekt_surowce, tab_korekt_prod = st.tabs([
@@ -297,15 +303,16 @@ elif menu == "Panel Administracyjny":
     
     # --- ZARZĄDZANIE KONTAMI ---
     with tab_uzytkownicy:
-        st.subheader("Zarządzanie Dostępem")
+        st.subheader("Zarządzanie Dostępem i Uprawnieniami")
         
-        # Wyświetlanie aktualnych użytkowników
         lista_uzytkownikow = []
         for l, dane in st.session_state.uzytkownicy.items():
             lista_uzytkownikow.append({
                 "Login": l,
                 "Imię i Nazwisko": dane["imie"],
-                "Uprawnienia (Rola)": dane["rola"]
+                "Dostęp: Produkcja": "Tak" if dane["uprawnienia"].get("produkcja") else "Nie",
+                "Dostęp: PZ/WZ": "Tak" if dane["uprawnienia"].get("magazyn") else "Nie",
+                "Dostęp: Admin": "Tak" if dane["uprawnienia"].get("admin") else "Nie"
             })
             
         st.write("**Aktywne konta w systemie:**")
@@ -318,25 +325,30 @@ elif menu == "Panel Administracyjny":
             with colA:
                 nowy_login = st.text_input("Login (Identyfikator)")
                 nowe_imie = st.text_input("Imię i Nazwisko")
-            with colB:
                 nowe_haslo = st.text_input("Hasło startowe", type="password")
-                nowa_rola = st.selectbox("Rola systemowa", ["Pracownik", "Magazynier", "Produkcja", "Admin"])
+            with colB:
+                st.write("Wybierz uprawnienia dla konta:")
+                upr_produkcja = st.checkbox("Dostęp do Modułu Produkcji")
+                upr_magazyn = st.checkbox("Dostęp do Operacji Magazynowych (PZ/WZ)")
+                upr_admin = st.checkbox("Dostęp do Panelu Administracyjnego")
                 
-            st.caption("ℹ️ **Admin:** Pełen dostęp. **Pracownik:** Produkcja + Magazyn. **Magazynier:** Tylko PZ/WZ. **Produkcja:** Tylko Produkcja.")
-            
             if st.form_submit_button("Utwórz konto"):
                 nowy_login = nowy_login.strip()
                 if not nowy_login or not nowe_haslo or not nowe_imie:
-                    st.error("Wszystkie pola są wymagane!")
+                    st.error("Wszystkie pola (Login, Imię, Hasło) są wymagane!")
                 elif nowy_login in st.session_state.uzytkownicy:
                     st.error("Konto o takim loginie już istnieje!")
                 else:
                     st.session_state.uzytkownicy[nowy_login] = {
                         "haslo": nowe_haslo,
-                        "rola": nowa_rola,
-                        "imie": nowe_imie
+                        "imie": nowe_imie,
+                        "uprawnienia": {
+                            "produkcja": upr_produkcja,
+                            "magazyn": upr_magazyn,
+                            "admin": upr_admin
+                        }
                     }
-                    st.success(f"Pomyślnie utworzono nowe konto dla: {nowe_imie}!")
+                    st.success(f"Pomyślnie utworzono nowe konto z wybranymi uprawnieniami dla: {nowe_imie}!")
                     st.rerun()
 
     # --- KOREKTA SUROWCÓW ---
