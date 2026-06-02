@@ -8,8 +8,11 @@ st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
 # ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
 # ==========================================
-if 'init_v4' not in st.session_state:
-    st.session_state.init_v4 = True
+if 'init_v5' not in st.session_state:
+    st.session_state.init_v5 = True
+    
+    # Licznik dokumentów WZ
+    st.session_state.wz_counter = 1
     
     st.session_state.uzytkownicy = {
         "admin": {
@@ -114,7 +117,7 @@ if not st.session_state.zalogowany:
 st.sidebar.title("Nawigacja")
 
 st.sidebar.info(f"Zalogowano jako:\n**{st.session_state.aktualny_uzytkownik}**")
-if st.sidebar.button("🚪 Wyloguj", use_container_width=True):
+if st.sidebar.button("Wyloguj", use_container_width=True):
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -153,7 +156,7 @@ if menu == "Pulpit Główny":
     with colA:
         st.markdown(f"""
         <div class="metric-card">
-            <p class="big-metric-label">📦 STAN MAGAZYNU (GOTOWE ROLKI)</p>
+            <p class="big-metric-label">STAN MAGAZYNU (GOTOWE ROLKI)</p>
             <p class="big-metric" style="color: #205493;">{stan_gotowych} szt.</p>
         </div>
         """, unsafe_allow_html=True)
@@ -161,7 +164,7 @@ if menu == "Pulpit Główny":
         kolor_potencjalu = "#2e7d32" if max_rolek > 0 else "#d32f2f"
         st.markdown(f"""
         <div class="metric-card">
-            <p class="big-metric-label">🚀 POTENCJAŁ PRODUKCYJNY Z OBECNYCH SUROWCÓW</p>
+            <p class="big-metric-label">POTENCJAŁ PRODUKCYJNY (SUROWCE)</p>
             <p class="big-metric" style="color: {kolor_potencjalu};">{max_rolek} szt.</p>
         </div>
         """, unsafe_allow_html=True)
@@ -251,32 +254,35 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
     with tab_wz:
         st.subheader("Wydanie produktów do klienta i Generator WZ")
         
-        # Jeśli WZ zostało właśnie wygenerowane, pokazujemy podgląd i przycisk pobierania
+        # Sekcja widoczna po wygenerowaniu dokumentu
         if "wygenerowane_wz" in st.session_state:
             st.success("Transakcja zaksięgowana pomyślnie. Dokument WZ gotowy do pobrania.")
             
-            # Podgląd sformatowanego dokumentu na ekranie
             st.code(st.session_state.wygenerowane_wz, language="text")
             
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 st.download_button(
-                    label="📄 Pobierz plik WZ do druku (.txt)",
+                    label="Pobierz plik WZ do druku (.txt)",
                     data=st.session_state.wygenerowane_wz,
                     file_name=st.session_state.nazwa_pliku_wz,
                     mime="text/plain",
                     use_container_width=True
                 )
             with col_btn2:
-                if st.button("⬅️ Wyczyść i wystaw kolejny dokument", use_container_width=True):
+                if st.button("Wyczyść formularz i wystaw kolejny dokument", use_container_width=True):
                     del st.session_state.wygenerowane_wz
                     del st.session_state.nazwa_pliku_wz
                     st.rerun()
                     
-        # Jeśli WZ nie jest wygenerowane, pokazujemy formularz wprowadzania
+        # Sekcja wprowadzania danych z automatycznym numerem WZ
         else:
+            # Konstrukcja automatycznego numeru WZ
+            data_dzis_str = datetime.now().strftime("%Y/%m/%d")
+            nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
+            
             with st.form("wz_form"):
-                nr_doc_wz = st.text_input("Numer dokumentu (np. WZ/2026/06/01)", key="wz_doc")
+                nr_doc_wz = st.text_input("Numer dokumentu (Generowany automatycznie)", value=nr_wz_auto, disabled=True)
                 klient = st.text_input("Nazwa firmy / Odbiorca")
                 wybrany_prod = st.selectbox("Wybierz asortyment", st.session_state.produkty["Wariant"].tolist())
                 
@@ -286,17 +292,18 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                 ilosc_wz = st.number_input("Ilość do wydania", min_value=1, max_value=int(stan_obecny) if stan_obecny > 0 else 1)
                 
                 if st.form_submit_button("Zatwierdź i Generuj WZ"):
-                    if not nr_doc_wz.strip() or not klient.strip():
-                        st.error("Pola 'Numer dokumentu' oraz 'Odbiorca' są obowiązkowe!")
+                    if not klient.strip():
+                        st.error("Pole 'Odbiorca' jest obowiązkowe!")
                     elif ilosc_wz <= stan_obecny:
-                        # 1. Odjęcie towaru ze stanu
+                        # Zapisanie ruchu
                         idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == wybrany_prod][0]
                         st.session_state.produkty.at[idx, "Stan"] -= ilosc_wz
-                        
-                        # 2. Rejestracja ruchu magazynowego
                         dodaj_ruch("WZ", nr_doc_wz, wybrany_prod, ilosc_wz)
                         
-                        # 3. GENEROWANIE DOKUMENTU WZ (Sformatowany tekst)
+                        # Inkrementacja licznika PO poprawnym wystawieniu
+                        st.session_state.wz_counter += 1
+                        
+                        # Generowanie tekstu dokumentu
                         data_wystawienia = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         wystawil = st.session_state.aktualny_uzytkownik
                         
@@ -319,10 +326,9 @@ POZ | NAZWA TOWARU                          | ILOŚĆ | JM
 .......................                 .......................
    (Podpis wystawcy)                      (Podpis odbiorcy)
 """
-                        # Zapisanie dokumentu do pamięci podręcznej, aby wyświetlić po odświeżeniu
                         st.session_state.wygenerowane_wz = wz_text
-                        safe_name = nr_doc_wz.replace('/', '_').replace('\\', '_').replace(' ', '_')
-                        st.session_state.nazwa_pliku_wz = f"WZ_{safe_name}.txt"
+                        safe_name = nr_doc_wz.replace('/', '_')
+                        st.session_state.nazwa_pliku_wz = f"{safe_name}.txt"
                         
                         st.rerun()
                     else:
