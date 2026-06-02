@@ -1,17 +1,30 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import os
+import urllib.request
+from fpdf import FPDF
 
 # Konfiguracja strony
 st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
 
 # ==========================================
+# POBIERANIE CZCIONKI DLA POLSKICH ZNAKÓW
+# ==========================================
+@st.cache_resource
+def pobierz_czcionke():
+    font_path = "Roboto-Regular.ttf"
+    if not os.path.exists(font_path):
+        # Pobieranie czcionki z polskimi znakami bezpośrednio z zasobów Google
+        urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf", font_path)
+    return font_path
+
+# ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
 # ==========================================
-if 'init_v5' not in st.session_state:
-    st.session_state.init_v5 = True
+if 'init_v6' not in st.session_state:
+    st.session_state.init_v6 = True
     
-    # Licznik dokumentów WZ
     st.session_state.wz_counter = 1
     
     st.session_state.uzytkownicy = {
@@ -230,7 +243,7 @@ elif menu == "Moduł Produkcji":
                 st.rerun()
 
 # ------------------------------------------
-# ZAKŁADKA 3: OPERACJE MAGAZYNOWE Z GENERATOREM WZ
+# ZAKŁADKA 3: OPERACJE MAGAZYNOWE (GENERATOR PDF)
 # ------------------------------------------
 elif menu == "Operacje Magazynowe (PZ/WZ)":
     st.header("Zarządzanie Zapasami (PZ/WZ)")
@@ -252,32 +265,29 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                 st.rerun()
 
     with tab_wz:
-        st.subheader("Wydanie produktów do klienta i Generator WZ")
+        st.subheader("Wydanie produktów do klienta i Generator WZ (PDF)")
         
-        # Sekcja widoczna po wygenerowaniu dokumentu
-        if "wygenerowane_wz" in st.session_state:
-            st.success("Transakcja zaksięgowana pomyślnie. Dokument WZ gotowy do pobrania.")
-            
-            st.code(st.session_state.wygenerowane_wz, language="text")
+        # Jeśli WZ zostało wygenerowane - pobieranie PDF
+        if "wygenerowane_pdf" in st.session_state:
+            st.success(f"Transakcja zaksięgowana. Dokument {st.session_state.nazwa_pliku_wz} jest gotowy do druku.")
             
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 st.download_button(
-                    label="Pobierz plik WZ do druku (.txt)",
-                    data=st.session_state.wygenerowane_wz,
+                    label="📄 Pobierz dokument WZ (.pdf)",
+                    data=st.session_state.wygenerowane_pdf,
                     file_name=st.session_state.nazwa_pliku_wz,
-                    mime="text/plain",
+                    mime="application/pdf",
                     use_container_width=True
                 )
             with col_btn2:
-                if st.button("Wyczyść formularz i wystaw kolejny dokument", use_container_width=True):
-                    del st.session_state.wygenerowane_wz
+                if st.button("⬅️ Wyczyść formularz i wystaw kolejny dokument", use_container_width=True):
+                    del st.session_state.wygenerowane_pdf
                     del st.session_state.nazwa_pliku_wz
                     st.rerun()
                     
-        # Sekcja wprowadzania danych z automatycznym numerem WZ
+        # Wprowadzanie danych z automatycznym numerem WZ
         else:
-            # Konstrukcja automatycznego numeru WZ
             data_dzis_str = datetime.now().strftime("%Y/%m/%d")
             nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
             
@@ -291,44 +301,74 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
                 
                 ilosc_wz = st.number_input("Ilość do wydania", min_value=1, max_value=int(stan_obecny) if stan_obecny > 0 else 1)
                 
-                if st.form_submit_button("Zatwierdź i Generuj WZ"):
+                if st.form_submit_button("Zatwierdź i Generuj PDF"):
                     if not klient.strip():
                         st.error("Pole 'Odbiorca' jest obowiązkowe!")
                     elif ilosc_wz <= stan_obecny:
-                        # Zapisanie ruchu
+                        # 1. Zapisanie ruchu
                         idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == wybrany_prod][0]
                         st.session_state.produkty.at[idx, "Stan"] -= ilosc_wz
                         dodaj_ruch("WZ", nr_doc_wz, wybrany_prod, ilosc_wz)
                         
-                        # Inkrementacja licznika PO poprawnym wystawieniu
                         st.session_state.wz_counter += 1
                         
-                        # Generowanie tekstu dokumentu
+                        # 2. GENEROWANIE PLIKU PDF
+                        font_path = pobierz_czcionke() # Zapewnia polskie znaki
                         data_wystawienia = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         wystawil = st.session_state.aktualny_uzytkownik
                         
-                        wz_text = f"""================================================================
-               DOKUMENT WYDANIA ZEWNĘTRZNEGO (WZ)
-================================================================
-NR DOKUMENTU: {nr_doc_wz}
-DATA WYDANIA: {data_wystawienia}
-WYSTAWIŁ:     {wystawil}
-ODBIORCA:     {klient}
-
-----------------------------------------------------------------
-POZ | NAZWA TOWARU                          | ILOŚĆ | JM
-----------------------------------------------------------------
-1   | {wybrany_prod:<37} | {ilosc_wz:<5} | szt.
-================================================================
-
-
-
-.......................                 .......................
-   (Podpis wystawcy)                      (Podpis odbiorcy)
-"""
-                        st.session_state.wygenerowane_wz = wz_text
+                        pdf = FPDF()
+                        pdf.add_page()
+                        pdf.add_font("Roboto", "", font_path)
+                        
+                        # Nagłówek
+                        pdf.set_font("Roboto", "", 18)
+                        pdf.cell(0, 15, "DOKUMENT WYDANIA ZEWNĘTRZNEGO (WZ)", ln=True, align='C')
+                        
+                        # Dane dokumentu
+                        pdf.set_font("Roboto", "", 12)
+                        pdf.ln(10)
+                        pdf.cell(50, 8, "NUMER DOKUMENTU:", border=0)
+                        pdf.cell(0, 8, nr_doc_wz, border=0, ln=True)
+                        
+                        pdf.cell(50, 8, "DATA WYDANIA:", border=0)
+                        pdf.cell(0, 8, data_wystawienia, border=0, ln=True)
+                        
+                        pdf.cell(50, 8, "WYSTAWIŁ:", border=0)
+                        pdf.cell(0, 8, wystawil, border=0, ln=True)
+                        
+                        pdf.cell(50, 8, "ODBIORCA:", border=0)
+                        pdf.cell(0, 8, klient, border=0, ln=True)
+                        
+                        # Tabela
+                        pdf.ln(10)
+                        pdf.set_font("Roboto", "", 10)
+                        
+                        # Nagłówki tabeli
+                        pdf.cell(15, 10, "Lp.", border=1, align='C')
+                        pdf.cell(115, 10, "Nazwa towaru", border=1, align='C')
+                        pdf.cell(30, 10, "Ilość", border=1, align='C')
+                        pdf.cell(30, 10, "Jm.", border=1, align='C', ln=True)
+                        
+                        # Wiersz towaru
+                        pdf.cell(15, 10, "1", border=1, align='C')
+                        pdf.cell(115, 10, wybrany_prod, border=1, align='L')
+                        pdf.cell(30, 10, str(ilosc_wz), border=1, align='C')
+                        pdf.cell(30, 10, "szt.", border=1, align='C', ln=True)
+                        
+                        # Miejsce na podpisy
+                        pdf.ln(30)
+                        pdf.cell(95, 10, ".......................................................", align='C')
+                        pdf.cell(95, 10, ".......................................................", align='C', ln=True)
+                        pdf.cell(95, 5, "(Podpis wystawcy)", align='C')
+                        pdf.cell(95, 5, "(Podpis odbiorcy)", align='C', ln=True)
+                        
+                        # Zapisanie PDF do pamięci podręcznej (jako bajty)
+                        pdf_bytes = bytes(pdf.output())
+                        st.session_state.wygenerowane_pdf = pdf_bytes
+                        
                         safe_name = nr_doc_wz.replace('/', '_')
-                        st.session_state.nazwa_pliku_wz = f"{safe_name}.txt"
+                        st.session_state.nazwa_pliku_wz = f"{safe_name}.pdf"
                         
                         st.rerun()
                     else:
@@ -356,7 +396,6 @@ elif menu == "Panel Administracyjny" and st.session_state.aktualne_uprawnienia.g
                 "Dostęp: Admin": "Tak" if dane["uprawnienia"].get("admin") else "Nie"
             })
             
-        st.write("**Aktywne konta w systemie:**")
         st.dataframe(pd.DataFrame(lista_uzytkownikow), use_container_width=True, hide_index=True)
         
         st.divider()
