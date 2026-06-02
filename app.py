@@ -37,11 +37,13 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY
+# 1. INICJALIZACJA BAZY (WERSJA V25)
 # ==========================================
-if 'init_v24' not in st.session_state:
-    st.session_state.init_v24 = True
+if 'init_v25' not in st.session_state:
+    st.session_state.init_v25 = True
     st.session_state.wz_counter = 1
+    st.session_state.jumbo_counter = 1
+    st.session_state.konf_counter = 1
     
     st.session_state.uzytkownicy = {
         "admin": {
@@ -90,6 +92,11 @@ if 'init_v24' not in st.session_state:
     st.session_state.historia = pd.DataFrame(columns=[
         "Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"
     ])
+    
+    # TRWAŁE REPOZYTORIA DLA ARCHIWUM DOKUMENTÓW PDF
+    st.session_state.archiwum_wz_pdf = []
+    st.session_state.archiwum_jumbo_pdf = []
+    st.session_state.archiwum_konf_pdf = []
 
 def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     uzytkownik = st.session_state.aktualny_uzytkownik if st.session_state.aktualny_uzytkownik else "System"
@@ -208,6 +215,18 @@ elif menu == "Moduł Production":
     st.header("Zarządzanie Produkcją")
     tab1, tab2 = st.tabs(["KROK 1: Maszyna Główna", "KROK 2: Konfekcja"])
     
+    # DYNAMICZNY PODGLĄD GENEROWANEGO PLIKU PDF NA GÓRZE STRONY PRODUKCYJNEJ
+    if "ostatnia_produkcja_pdf" in st.session_state:
+        st.success(f"Zaksięgowano pomyślnie raport: {st.session_state.nazwa_pliku_produkcji}")
+        st.download_button(
+            label="Pobierz wygenerowaną kartę procesu (.pdf)",
+            data=st.session_state.ostatnia_produkcja_pdf,
+            file_name=st.session_state.nazwa_pliku_produkcji,
+            mime="application/pdf",
+            use_container_width=True
+        )
+        st.divider()
+    
     with tab1:
         st.subheader("Wytłaczanie Rolek Jumbo (115cm x 13mb)")
         s_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
@@ -231,15 +250,68 @@ elif menu == "Moduł Production":
             with st.form("prod_jumbo"):
                 ile_jumbo = st.number_input("Ile Rolek Jumbo wyprodukowano?", min_value=1, max_value=m_jumbo, value=1)
                 if st.form_submit_button("Zaksięguj produkcję z Maszyny Głównej"):
+                    data_dzis_str = datetime.now().strftime("%Y/%m/%d")
+                    nr_jmb_auto = f"PR-JMB/{data_dzis_str}/{st.session_state.jumbo_counter:03d}"
+                    
                     st.session_state.polprodukty.at[0, "Stan"] += ile_jumbo
                     nazwa_p = st.session_state.polprodukty.at[0, "Nazwa"]
-                    dodaj_ruch("PW (Półprod.)", "Hala Główna", nazwa_p, ile_jumbo, "Wytłaczarka")
+                    dodaj_ruch("PW (Półprod.)", nr_jmb_auto, nazwa_p, ile_jumbo, "Wytłaczarka")
                     
+                    # GENEROWANIE DOKUMENTU PDF DLA JUMBO
+                    font_path, font_bold_path = pobierz_czcionki()
+                    pdf = FPDF()
+                    pdf.add_page()
+                    pdf.add_font("Roboto", "", font_path)
+                    pdf.add_font("Roboto", "B", font_bold_path)
+                    
+                    pdf.set_fill_color(240, 240, 240)
+                    pdf.set_font("Roboto", "B", 14)
+                    pdf.cell(0, 12, f"KARTA PRZEBIEGU PRODUKCJI JUMBO: {nr_jmb_auto}", border=0, ln=1, align='C', fill=True)
+                    
+                    pdf.set_font("Roboto", "", 9)
+                    pdf.cell(0, 6, f"Data zlecenia: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   |   Stanowisko: Wytłaczarka Główna", border=0, ln=1, align='C')
+                    pdf.ln(8)
+                    
+                    pdf.set_font("Roboto", "B", 11)
+                    pdf.cell(0, 6, "1. UZYSKANY ASORTYMENT", border="B", ln=1)
+                    pdf.set_font("Roboto", "", 10)
+                    pdf.cell(100, 8, f"Nazwa produktu: {nazwa_p}", ln=0)
+                    pdf.cell(0, 8, f"Ilość: {ile_jumbo} szt.", ln=1)
+                    pdf.ln(5)
+                    
+                    pdf.set_font("Roboto", "B", 11)
+                    pdf.cell(0, 6, "2. ROZLICZENIE ZUŻYCIA SUROWCÓW BAZOWYCH", border="B", ln=1)
+                    pdf.ln(2)
+                    pdf.set_font("Roboto", "B", 9)
+                    pdf.cell(15, 8, "Lp.", border=1, align='C')
+                    pdf.cell(115, 8, "Nazwa surowca pobranego z magazynu", border=1, align='L')
+                    pdf.cell(60, 8, "Ilość zużyta", border=1, align='C', ln=1)
+                    pdf.set_font("Roboto", "", 9)
+                    
+                    lp_k = 1
                     for k_id, zuzycie in st.session_state.receptura_baza.items():
                         idx = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == k_id][0]
-                        st.session_state.komponenty.at[idx, "Stan"] -= (zuzycie * ile_jumbo)
-                        dodaj_ruch("RW", "Hala Główna", st.session_state.komponenty.at[idx, "Nazwa"], zuzycie * ile_jumbo, "Wytłaczarka")
-                    st.success("Produkcja została pomyślnie zaksięgowana.")
+                        laczne_zuzycie = zuzycie * ile_jumbo
+                        st.session_state.komponenty.at[idx, "Stan"] -= laczne_zuzycie
+                        dodaj_ruch("RW", nr_jmb_auto, st.session_state.komponenty.at[idx, "Nazwa"], laczne_zuzycie, "Wytłaczarka")
+                        
+                        pdf.cell(15, 8, str(lp_k), border=1, align='C')
+                        pdf.cell(115, 8, st.session_state.komponenty.at[idx, "Nazwa"], border=1, align='L')
+                        pdf.cell(60, 8, f"{laczne_zuzycie:g} {st.session_state.komponenty.at[idx, 'Jednostka']}", border=1, align='C', ln=1)
+                        lp_k += 1
+                        
+                    pdf.ln(25)
+                    pdf.cell(95, 5, "..........................................................", align='C')
+                    pdf.cell(95, 5, "..........................................................", align='C', ln=1)
+                    pdf.cell(95, 5, "Zatwierdził (Operator)", align='C')
+                    pdf.cell(95, 5, "Kierownik Produkcji", align='C', ln=1)
+                    
+                    pdf_bytes = bytes(pdf.output())
+                    st.session_state.archiwum_jumbo_pdf.append({"id": nr_jmb_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "ilosc": ile_jumbo, "pdf": pdf_bytes})
+                    
+                    st.session_state.jumbo_counter += 1
+                    st.session_state.ostatnia_produkcja_pdf = pdf_bytes
+                    st.session_state.nazwa_pliku_produkcji = f"{nr_jmb_auto.replace('/', '_')}.pdf"
                     st.rerun()
         else:
             st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
@@ -265,15 +337,68 @@ elif menu == "Moduł Production":
             st.divider()
             
             if zuzyte_cm == wymagane_cm:
-                st.success(f"Suma szerokości: {zuzyte_cm} cm / {wymagane_cm} cm. Rozkrój idealny. Brak odpadu.")
+                st.success(f"Suma szerokości wynosi {zuzyte_cm} cm. Rozkrój idealny.")
                 if st.button("Zatwierdź rozkrój i zaktualizuj magazyny"):
+                    data_dzis_str = datetime.now().strftime("%Y/%m/%d")
+                    nr_knf_auto = f"PR-KNF/{data_dzis_str}/{st.session_state.konf_counter:03d}"
+                    
                     st.session_state.polprodukty.at[0, "Stan"] -= ile_tniemy
-                    dodaj_ruch("RW (Półprod.)", "Stanowisko Cięcia", "Rolka Jumbo (115cm x 13mb)", ile_tniemy, "Konfekcja")
+                    dodaj_ruch("RW (Półprod.)", nr_knf_auto, "Rolka Jumbo (115cm x 13mb)", ile_tniemy, "Konfekcja")
+                    
+                    # INICJALIZACJA PDF DLA ROZKROJU KONFEKCJI
+                    font_path, font_bold_path = pobierz_czcionki()
+                    pdf = FPDF()
+                    pdf.add_page()
+                    pdf.add_font("Roboto", "", font_path)
+                    pdf.add_font("Roboto", "B", font_bold_path)
+                    
+                    pdf.set_fill_color(240, 240, 240)
+                    pdf.set_font("Roboto", "B", 14)
+                    pdf.cell(0, 12, f"KARTA ROZKROJU I KONFEKCJI: {nr_knf_auto}", border=0, ln=1, align='C', fill=True)
+                    
+                    pdf.set_font("Roboto", "", 9)
+                    pdf.cell(0, 6, f"Data operacji: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   |   Główny stół rozkroju", border=0, ln=1, align='C')
+                    pdf.ln(6)
+                    
+                    pdf.set_font("Roboto", "B", 11)
+                    pdf.cell(0, 6, "1. POBRANY MATERIAŁ WEJŚCIOWY", border="B", ln=1)
+                    pdf.set_font("Roboto", "", 10)
+                    pdf.cell(0, 8, f"Pobrano z magazynu: Rolka Jumbo (115cm x 13mb) - Ilość: {ile_tniemy} szt. (Łącznie: {wymagane_cm} cm)", ln=1)
+                    pdf.ln(5)
+                    
+                    pdf.set_font("Roboto", "B", 11)
+                    pdf.cell(0, 6, "2. REJESTR SKONFEKCJONOWANYCH PRODUKTÓW GOTOWYCH", border="B", ln=1)
+                    pdf.ln(2)
+                    pdf.set_font("Roboto", "B", 9)
+                    pdf.cell(15, 8, "Lp.", border=1, align='C')
+                    pdf.cell(125, 8, "Wariant gotowy (Szerokość / Wykończenie)", border=1, align='L')
+                    pdf.cell(40, 8, "Ilość uzyskana", border=1, align='C', ln=1)
+                    pdf.set_font("Roboto", "", 9)
+                    
+                    lp_k = 1
                     for idx, ilosc in rozkroj.items():
                         if ilosc > 0:
                             st.session_state.produkty.at[idx, "Stan"] += ilosc
-                            dodaj_ruch("PW (Gotowe)", "Stanowisko Cięcia", st.session_state.produkty.at[idx, "Wariant"], ilosc, "Konfekcja")
-                    st.success("Rozkrój pomyślnie zapisany w bazie.")
+                            wariant_nazwa = st.session_state.produkty.at[idx, "Wariant"]
+                            dodaj_ruch("PW (Gotowe)", nr_knf_auto, wariant_nazwa, ilosc, "Konfekcja")
+                            
+                            pdf.cell(15, 8, str(lp_k), border=1, align='C')
+                            pdf.cell(125, 8, wariant_nazwa, border=1, align='L')
+                            pdf.cell(40, 8, f"{ilosc} szt.", border=1, align='C', ln=1)
+                            lp_k += 1
+                            
+                    pdf.ln(25)
+                    pdf.cell(95, 5, "..........................................................", align='C')
+                    pdf.cell(95, 5, "..........................................................", align='C', ln=1)
+                    pdf.cell(95, 5, "Konfekcjoner (Podpis)", align='C')
+                    pdf.cell(95, 5, "Magazynier przyjmujący", align='C', ln=1)
+                    
+                    pdf_bytes = bytes(pdf.output())
+                    st.session_state.archiwum_konf_pdf.append({"id": nr_knf_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "jumbo_szt": ile_tniemy, "pdf": pdf_bytes})
+                    
+                    st.session_state.konf_counter += 1
+                    st.session_state.ostatnia_produkcja_pdf = pdf_bytes
+                    st.session_state.nazwa_pliku_produkcji = f"{nr_knf_auto.replace('/', '_')}.pdf"
                     st.rerun()
             elif zuzyte_cm < wymagane_cm:
                 st.warning(f"Suma szerokości wynosi {zuzyte_cm} cm. Rozdysponuj jeszcze {wymagane_cm - zuzyte_cm} cm.")
@@ -372,7 +497,7 @@ elif menu == "Wydanie Towaru (WZ)":
                     
                 with col_p3:
                     st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
-                    if st.button("Add to basket", use_container_width=True):
+                    if st.button("Dodaj do dokumentu", use_container_width=True):
                         istnieje = False
                         for item in st.session_state.wz_koszyk:
                             if item["Wariant"] == prawdziwa_nazwa:
@@ -487,64 +612,102 @@ elif menu == "Wydanie Towaru (WZ)":
                         pdf.set_x(135)
                         pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
                         
-                        st.session_state.wygenerowane_pdf = bytes(pdf.output())
+                        pdf_bytes = bytes(pdf.output())
+                        st.session_state.archiwum_wz_pdf.append({"id": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "kontrahent": wybrany_klient, "pdf": pdf_bytes})
+                        
+                        st.session_state.wygenerowane_pdf = pdf_bytes
                         st.session_state.nazwa_pliku_wz = f"{nr_wz_auto.replace('/', '_')}.pdf"
                         st.session_state.wz_koszyk = []
                         st.rerun()
 
 # ------------------------------------------
-# NOWY MODUŁ: ARCHIWUM DOKUMENTÓW PZ I WZ
+# CENTRALNE ARCHIWUM WSZYSTKICH PLIKÓW PDF
 # ------------------------------------------
 elif menu == "Archiwum Dokumentów":
-    st.header("Archiwum Dokumentów")
-    st.write("Wgląd w historyczne dokumenty przyjęcia zewnętrzne oraz wydania zewnętrzne.")
+    st.header("Archiwum Dokumentów Operacyjnych i Technologicznych")
     
-    # Filtrujemy dane, aby pokazać tylko operacje zewnętrzne handlowe (PZ oraz WZ)
-    df_zewnetrzne = st.session_state.historia[st.session_state.historia["Typ"].isin(["PZ", "WZ"])].copy()
+    tab_arch_wz, tab_arch_pz, tab_arch_jmb, tab_arch_knf = st.tabs([
+        "Wydania Zewnętrzne (WZ)", 
+        "Przyjęcia Zewnętrzne (PZ)", 
+        "Produkcja - Wytłaczanie JUMBO", 
+        "Produkcja - Konfekcja i Rozkrój"
+    ])
     
-    if df_zewnetrzne.empty:
-        st.info("Brak zarejestrowanych dokumentów handlowych w archiwum.")
-    else:
-        # Pasek filtrów wyszukiwania
-        col_fil1, col_fil2, col_fil3 = st.columns(3)
-        with col_fil1:
-            filtr_typ = st.selectbox("Typ dokumentu", ["Wszystkie", "Tylko PZ", "Tylko WZ"])
-        with col_fil2:
-            filtr_nr = st.text_input("Szukaj po numerze dokumentu")
-        with col_fil3:
-            lista_firm = ["Wszyscy kontrahenci"] + sorted(list(df_zewnetrzne["Kontrahent"].unique()))
-            filtr_firma = st.selectbox("Filtruj według kontrahenta", lista_firm)
+    # 1. ARCHIWUM WZ (POBIERANIE PDF)
+    with tab_arch_wz:
+        st.subheader("Rejestr Dokumentów WZ")
+        if not st.session_state.archiwum_wz_pdf:
+            st.info("Brak wystawionych dokumentów WZ w bazie danych.")
+        else:
+            df_wz = pd.DataFrame(st.session_state.archiwum_wz_pdf)[["id", "data", "kontrahent"]]
+            st.dataframe(df_wz, use_container_width=True, hide_index=True, column_config={"id":"Numer dokumentu", "data":"Data wystawienia", "kontrahent":"Odbiorca"})
             
-        # Zastosowanie filtrów logicznych na ramce danych
-        if filtr_typ == "Tylko PZ":
-            df_zewnetrzne = df_zewnetrzne[df_zewnetrzne["Typ"] == "PZ"]
-        elif filtr_typ == "Tylko WZ":
-            df_zewnetrzne = df_zewnetrzne[df_zewnetrzne["Typ"] == "WZ"]
+            lista_wz_id = [item["id"] for item in st.session_state.archiwum_wz_pdf]
+            wybrane_wz_id = st.selectbox("Wybierz numer WZ do pobrania pliku PDF", lista_wz_id, key="sel_wz")
             
-        if filtr_nr.strip():
-            df_zewnetrzne = df_zewnetrzne[df_zewnetrzne["Dokument"].str.contains(filtr_nr.strip(), case=False, na=False)]
+            wz_data_bytes = next(item["pdf"] for item in st.session_state.archiwum_wz_pdf if item["id"] == wybrane_wz_id)
+            st.download_button(
+                label=f"Pobierz dokument {wybrane_wz_id} (.pdf)",
+                data=wz_data_bytes,
+                file_name=f"{wybrane_wz_id.replace('/', '_')}.pdf",
+                mime="application/pdf",
+                key="btn_dl_wz"
+            )
+
+    # 2. ARCHIWUM PZ (REJESTR TEKSTOWY)
+    with tab_arch_pz:
+        st.subheader("Rejestr Dokumentów PZ")
+        df_pz = st.session_state.historia[st.session_state.historia["Typ"] == "PZ"]
+        if df_pz.empty:
+            st.info("Brak zarejestrowanych dokumentów PZ w bazie.")
+        else:
+            st.dataframe(
+                df_pz.sort_values(by="Data", ascending=False),
+                use_container_width=True, hide_index=True,
+                column_config={"Data":"Data przyjęcia", "Dokument":"Numer PZ", "Produkt/Surowiec":"Surowiec", "Ilosc":"Ilość", "Kontrahent":"Dostawca"}
+            )
+
+    # 3. ARCHIWUM JUMBO (POBIERANIE PDF)
+    with tab_arch_jmb:
+        st.subheader("Rejestr Procesów Wytłaczania (Krok 1)")
+        if not st.session_state.archiwum_jumbo_pdf:
+            st.info("Brak zarejestrowanych raportów z wytłaczarki Jumbo.")
+        else:
+            df_jmb = pd.DataFrame(st.session_state.archiwum_jumbo_pdf)[["id", "data", "ilosc"]]
+            st.dataframe(df_jmb, use_container_width=True, hide_index=True, column_config={"id":"Numer zlecenia", "data":"Data produkcji", "ilosc":"Ilość rolek Jumbo"})
             
-        if filtr_firma != "Wszyscy kontrahenci":
-            df_zewnetrzne = df_zewnetrzne[df_zewnetrzne["Kontrahent"] == filtr_firma]
+            lista_jmb_id = [item["id"] for item in st.session_state.archiwum_jumbo_pdf]
+            wybrane_jmb_id = st.selectbox("Wybierz numer raportu Jumbo do pobrania PDF", lista_jmb_id, key="sel_jmb")
             
-        st.divider()
-        st.write(f"Znalezione pozycje: {len(df_zewnetrzne)}")
-        
-        # Wyświetlanie czystej tabeli logów bez indeksu i technicznych zawiłości
-        st.dataframe(
-            df_zewnetrzne.sort_values(by="Data", ascending=False),
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Data": st.column_config.DatetimeColumn("Data operacji", format="YYYY-MM-DD HH:mm"),
-                "Typ": st.column_config.TextColumn("Typ"),
-                "Dokument": st.column_config.TextColumn("Numer dokumentu"),
-                "Produkt/Surowiec": st.column_config.TextColumn("Nazwa asortymentu"),
-                "Ilosc": st.column_config.NumberColumn("Ilość (szt./jm.)", format="%g"),
-                "Użytkownik": st.column_config.TextColumn("Operator"),
-                "Kontrahent": st.column_config.TextColumn("Kontrahent")
-            }
-        )
+            jmb_data_bytes = next(item["pdf"] for item in st.session_state.archiwum_jumbo_pdf if item["id"] == wybrane_jmb_id)
+            st.download_button(
+                label=f"Pobierz Kartę Procesu {wybrane_jmb_id} (.pdf)",
+                data=jmb_data_bytes,
+                file_name=f"{wybrane_jmb_id.replace('/', '_')}.pdf",
+                mime="application/pdf",
+                key="btn_dl_jmb"
+            )
+
+    # 4. ARCHIWUM KONFEKCJI (POBIERANIE PDF)
+    with tab_arch_knf:
+        st.subheader("Rejestr Procesów Konfekcjonowania i Rozkroju (Krok 2)")
+        if not st.session_state.archiwum_konf_pdf:
+            st.info("Brak zarejestrowanych raportów ze stanowiska rozkroju.")
+        else:
+            df_knf = pd.DataFrame(st.session_state.archiwum_konf_pdf)[["id", "data", "jumbo_szt"]]
+            st.dataframe(df_knf, use_container_width=True, hide_index=True, column_config={"id":"Numer zlecenia rozkroju", "data":"Data operacji", "jumbo_szt":"Zużyte rolki Jumbo (szt.)"})
+            
+            lista_knf_id = [item["id"] for item in st.session_state.archiwum_konf_pdf]
+            wybrane_knf_id = st.selectbox("Wybierz numer raportu konfekcji do pobrania PDF", lista_knf_id, key="sel_knf")
+            
+            knf_data_bytes = next(item["pdf"] for item in st.session_state.archiwum_konf_pdf if item["id"] == wybrane_knf_id)
+            st.download_button(
+                label=f"Pobierz Specyfikację Rozkroju {wybrane_knf_id} (.pdf)",
+                data=knf_data_bytes,
+                file_name=f"{wybrane_knf_id.replace('/', '_')}.pdf",
+                mime="application/pdf",
+                key="btn_dl_knf"
+            )
 
 elif menu == "Panel Administracyjny":
     st.header("Narzędzia Administracyjne")
