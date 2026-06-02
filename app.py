@@ -9,15 +9,17 @@ from fpdf import FPDF
 st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
 
 # ==========================================
-# POBIERANIE CZCIONKI DLA POLSKICH ZNAKÓW
+# POBIERANIE CZCIONEK DLA POLSKICH ZNAKÓW
 # ==========================================
 @st.cache_resource
-def pobierz_czcionke():
-    font_path = "Roboto-Regular.ttf"
-    if not os.path.exists(font_path):
-        # Pobieranie czcionki z polskimi znakami bezpośrednio z zasobów Google
-        urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf", font_path)
-    return font_path
+def pobierz_czcionki():
+    reg_path = "Roboto-Regular.ttf"
+    bold_path = "Roboto-Bold.ttf"
+    if not os.path.exists(reg_path):
+        urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf", reg_path)
+    if not os.path.exists(bold_path):
+        urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf", bold_path)
+    return reg_path, bold_path
 
 # ==========================================
 # 1. INICJALIZACJA BAZY "NA SUCHO"
@@ -201,7 +203,7 @@ if menu == "Pulpit Główny":
 # ZAKŁADKA 2: PRODUKCJA 
 # ------------------------------------------
 elif menu == "Moduł Produkcji":
-    st.header("Zarządzanie Produkcją: GrizoThermo+")
+    st.header("Zarządzanie Producją: GrizoThermo+")
     
     tab_kalk, tab_zlecenie = st.tabs(["Kalkulator Potencjału", "Zlecenie Produkcji"])
     wybrany_wariant = "GrizoThermo+ (1,15m x 13mb)"
@@ -243,7 +245,7 @@ elif menu == "Moduł Produkcji":
                 st.rerun()
 
 # ------------------------------------------
-# ZAKŁADKA 3: OPERACJE MAGAZYNOWE (GENERATOR PDF)
+# ZAKŁADKA 3: OPERACJE MAGAZYNOWE (PROFESJONALNY GENERATOR PDF)
 # ------------------------------------------
 elif menu == "Operacje Magazynowe (PZ/WZ)":
     st.header("Zarządzanie Zapasami (PZ/WZ)")
@@ -267,109 +269,197 @@ elif menu == "Operacje Magazynowe (PZ/WZ)":
     with tab_wz:
         st.subheader("Wydanie produktów do klienta i Generator WZ (PDF)")
         
-        # Jeśli WZ zostało wygenerowane - pobieranie PDF
         if "wygenerowane_pdf" in st.session_state:
-            st.success(f"Transakcja zaksięgowana. Dokument {st.session_state.nazwa_pliku_wz} jest gotowy do druku.")
+            st.success(f"Transakcja zaksięgowana. Dokument {st.session_state.nazwa_pliku_wz} jest gotowy do pobrania.")
             
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 st.download_button(
-                    label="📄 Pobierz dokument WZ (.pdf)",
+                    label="Pobierz oficjalny dokument WZ (.pdf)",
                     data=st.session_state.wygenerowane_pdf,
                     file_name=st.session_state.nazwa_pliku_wz,
                     mime="application/pdf",
                     use_container_width=True
                 )
             with col_btn2:
-                if st.button("⬅️ Wyczyść formularz i wystaw kolejny dokument", use_container_width=True):
+                if st.button("Wyczyść formularz i wystaw kolejny dokument", use_container_width=True):
                     del st.session_state.wygenerowane_pdf
                     del st.session_state.nazwa_pliku_wz
                     st.rerun()
                     
-        # Wprowadzanie danych z automatycznym numerem WZ
         else:
             data_dzis_str = datetime.now().strftime("%Y/%m/%d")
             nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
             
             with st.form("wz_form"):
-                nr_doc_wz = st.text_input("Numer dokumentu (Generowany automatycznie)", value=nr_wz_auto, disabled=True)
-                klient = st.text_input("Nazwa firmy / Odbiorca")
-                wybrany_prod = st.selectbox("Wybierz asortyment", st.session_state.produkty["Wariant"].tolist())
-                
-                stan_obecny = st.session_state.produkty[st.session_state.produkty["Wariant"] == wybrany_prod]["Stan"].values[0]
-                st.caption(f"Dostępne na magazynie: {stan_obecny} szt.")
-                
-                ilosc_wz = st.number_input("Ilość do wydania", min_value=1, max_value=int(stan_obecny) if stan_obecny > 0 else 1)
-                
-                if st.form_submit_button("Zatwierdź i Generuj PDF"):
-                    if not klient.strip():
-                        st.error("Pole 'Odbiorca' jest obowiązkowe!")
+                col_f1, col_f2 = st.columns(2)
+                with col_f1:
+                    nr_doc_wz = st.text_input("Numer dokumentu (Generowany automatycznie)", value=nr_wz_auto, disabled=True)
+                    klient_nazwa = st.text_input("Nabywca (Nazwa firmy)")
+                    klient_adres = st.text_area("Adres Nabywcy (ulica, kod, miasto)", height=68)
+                    klient_nip = st.text_input("NIP Nabywcy")
+                with col_f2:
+                    wybrany_prod = st.selectbox("Wybierz asortyment", st.session_state.produkty["Wariant"].tolist())
+                    stan_obecny = st.session_state.produkty[st.session_state.produkty["Wariant"] == wybrany_prod]["Stan"].values[0]
+                    st.caption(f"Dostępne na magazynie: {stan_obecny} szt.")
+                    ilosc_wz = st.number_input("Ilość do wydania", min_value=1, max_value=int(stan_obecny) if stan_obecny > 0 else 1)
+                    
+                    cena_jednostkowa = st.number_input("Cena jednostkowa netto (PLN)", min_value=0.01, value=150.00, step=5.0)
+                    uwagi_doc = st.text_input("Uwagi do dokumentu", value="Dostawa z magazynu głównego.")
+
+                if st.form_submit_button("Zatwierdź i Wystaw PDF"):
+                    if not klient_nazwa.strip() or not klient_adres.strip():
+                        st.error("Pola 'Nabywca' oraz 'Adres' są obowiązkowe!")
                     elif ilosc_wz <= stan_obecny:
-                        # 1. Zapisanie ruchu
+                        
                         idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == wybrany_prod][0]
                         st.session_state.produkty.at[idx, "Stan"] -= ilosc_wz
                         dodaj_ruch("WZ", nr_doc_wz, wybrany_prod, ilosc_wz)
                         
                         st.session_state.wz_counter += 1
                         
-                        # 2. GENEROWANIE PLIKU PDF
-                        font_path = pobierz_czcionke() # Zapewnia polskie znaki
-                        data_wystawienia = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        wystawil = st.session_state.aktualny_uzytkownik
+                        # KALKULACJE FINANSOWE
+                        wartosc_netto = ilosc_wz * cena_jednostkowa
+                        stawka_vat = 23
+                        kwota_vat = wartosc_netto * 0.23
+                        wartosc_brutto = wartosc_netto + kwota_vat
+                        
+                        # INICJALIZACJA I BUDOWA PDF DOKŁADNIE WEDŁUG WZORU
+                        font_path, font_bold_path = pobierz_czcionki()
+                        wystawiono_miejscowosc = "Katowice"
                         
                         pdf = FPDF()
                         pdf.add_page()
                         pdf.add_font("Roboto", "", font_path)
+                        pdf.add_font("Roboto", "B", font_bold_path)
                         
-                        # Nagłówek
-                        pdf.set_font("Roboto", "", 18)
-                        pdf.cell(0, 15, "DOKUMENT WYDANIA ZEWNĘTRZNEGO (WZ)", ln=True, align='C')
+                        # 1. Nagłówek (Góra strony)
+                        pdf.set_font("Roboto", "", 9)
+                        data_aktualna = datetime.now().strftime("%Y-%m-%d")
+                        pdf.cell(95, 5, f"Wystawiono dnia: {data_aktualna}, {wystawiono_miejscowosc}", border=0, ln=0)
                         
-                        # Dane dokumentu
-                        pdf.set_font("Roboto", "", 12)
-                        pdf.ln(10)
-                        pdf.cell(50, 8, "NUMER DOKUMENTU:", border=0)
-                        pdf.cell(0, 8, nr_doc_wz, border=0, ln=True)
+                        pdf.set_font("Roboto", "B", 13)
+                        pdf.cell(95, 5, f"Wydanie Zewnętrzne nr {nr_doc_wz}", border=0, ln=1, align='R')
+                        pdf.ln(12)
                         
-                        pdf.cell(50, 8, "DATA WYDANIA:", border=0)
-                        pdf.cell(0, 8, data_wystawienia, border=0, ln=True)
+                        # 2. Dane stron (Układ dwukolumnowy)
+                        y_blok_stron = pdf.get_y()
                         
-                        pdf.cell(50, 8, "WYSTAWIŁ:", border=0)
-                        pdf.cell(0, 8, wystawil, border=0, ln=True)
+                        # Lewa kolumna: Sprzedawca
+                        pdf.set_font("Roboto", "B", 10)
+                        pdf.cell(95, 5, "Sprzedawca:", border=0, ln=1)
+                        pdf.set_font("Roboto", "", 9)
+                        pdf.multi_cell(95, 5, "GrizoThermo Sp. z o.o.\nul. Fabryczna 14A\n44-100 Katowice\nNIP: 1234567890\nbiuro@grizothermo.pl")
+                        y_koniec_sprzedawcy = pdf.get_y()
                         
-                        pdf.cell(50, 8, "ODBIORCA:", border=0)
-                        pdf.cell(0, 8, klient, border=0, ln=True)
+                        # Prawa kolumna: Nabywca & Odbiorca
+                        pdf.set_xy(110, y_blok_stron)
+                        pdf.set_font("Roboto", "B", 10)
+                        pdf.cell(95, 5, "Nabywca:", border=0, ln=1)
+                        pdf.set_font("Roboto", "", 9)
+                        pdf.set_x(110)
                         
-                        # Tabela
-                        pdf.ln(10)
-                        pdf.set_font("Roboto", "", 10)
+                        adres_czysty = klient_adres.strip()
+                        nip_czysty = f"NIP: {klient_nip.strip()}" if klient_nip.strip() else ""
+                        pdf.multi_cell(95, 5, f"{klient_nazwa.strip()}\n{adres_czysty}\n{nip_czysty}")
                         
-                        # Nagłówki tabeli
-                        pdf.cell(15, 10, "Lp.", border=1, align='C')
-                        pdf.cell(115, 10, "Nazwa towaru", border=1, align='C')
-                        pdf.cell(30, 10, "Ilość", border=1, align='C')
-                        pdf.cell(30, 10, "Jm.", border=1, align='C', ln=True)
+                        pdf.ln(3)
+                        pdf.set_x(110)
+                        pdf.set_font("Roboto", "B", 10)
+                        pdf.cell(95, 5, "Odbiorca:", border=0, ln=1)
+                        pdf.set_font("Roboto", "", 9)
+                        pdf.set_x(110)
+                        pdf.multi_cell(95, 5, f"{klient_nazwa.strip()}\n{adres_czysty}")
                         
-                        # Wiersz towaru
-                        pdf.cell(15, 10, "1", border=1, align='C')
-                        pdf.cell(115, 10, wybrany_prod, border=1, align='L')
-                        pdf.cell(30, 10, str(ilosc_wz), border=1, align='C')
-                        pdf.cell(30, 10, "szt.", border=1, align='C', ln=True)
+                        # Wyznaczanie bezpiecznego punktu Y dla tabeli
+                        najnizszy_y = max(y_koniec_sprzedawcy, pdf.get_y()) + 12
+                        pdf.set_y(najnizszy_y)
                         
-                        # Miejsce na podpisy
-                        pdf.ln(30)
-                        pdf.cell(95, 10, ".......................................................", align='C')
-                        pdf.cell(95, 10, ".......................................................", align='C', ln=True)
-                        pdf.cell(95, 5, "(Podpis wystawcy)", align='C')
-                        pdf.cell(95, 5, "(Podpis odbiorcy)", align='C', ln=True)
+                        # 3. Sekcja tabeli głównej (POZYCJE)
+                        pdf.set_font("Roboto", "B", 10)
+                        pdf.cell(190, 6, "POZYCJE", border=0, ln=1)
                         
-                        # Zapisanie PDF do pamięci podręcznej (jako bajty)
+                        # Szerokości kolumn (Suma = 190)
+                        w_lp = 8
+                        w_nazwa = 62
+                        w_ilosc = 15
+                        w_cena = 22
+                        w_wnetto = 25
+                        w_vat_proc = 12
+                        w_vated = 21
+                        w_wbrutto = 25
+                        
+                        pdf.set_font("Roboto", "B", 8.5)
+                        pdf.cell(w_lp, 8, "LP", border=1, align='C')
+                        pdf.cell(w_nazwa, 8, "Nazwa towaru/usługi", border=1, align='L')
+                        pdf.cell(w_ilosc, 8, "Ilość", border=1, align='C')
+                        pdf.cell(w_cena, 8, "Cena netto", border=1, align='R')
+                        pdf.cell(w_wnetto, 8, "Wartość netto", border=1, align='R')
+                        pdf.cell(w_vat_proc, 8, "VAT", border=1, align='C')
+                        pdf.cell(w_vated, 8, "Wartość VAT", border=1, align='R')
+                        pdf.cell(w_wbrutto, 8, "Wartość brutto", border=1, align='R', ln=1)
+                        
+                        # Wiersz z produktem
+                        pdf.set_font("Roboto", "", 9)
+                        pdf.cell(w_lp, 8, "1", border=1, align='C')
+                        pdf.cell(w_nazwa, 8, wybrany_prod, border=1, align='L')
+                        pdf.cell(w_ilosc, 8, f"{ilosc_wz} szt.", border=1, align='C')
+                        pdf.cell(w_cena, 8, f"{cena_jednostkowa:.2f}", border=1, align='R')
+                        pdf.cell(w_wnetto, 8, f"{wartosc_netto:.2f}", border=1, align='R')
+                        pdf.cell(w_vat_proc, 8, f"{stawka_vat}%", border=1, align='C')
+                        pdf.cell(w_vated, 8, f"{kwota_vat:.2f}", border=1, align='R')
+                        pdf.cell(w_wbrutto, 8, f"{wartosc_brutto:.2f}", border=1, align='R', ln=1)
+                        pdf.ln(6)
+                        
+                        # 4. Sekcja PODSUMOWANIE
+                        pdf.set_font("Roboto", "B", 10)
+                        pdf.cell(190, 6, "PODSUMOWANIE", border=0, ln=1)
+                        
+                        # Tabela rozbicia stawek (przesunięta w prawo)
+                        pdf.set_x(65)
+                        pdf.set_font("Roboto", "B", 8.5)
+                        pdf.cell(32, 6, "Wartość netto", border=1, align='R')
+                        pdf.cell(25, 6, "Stawka VAT", border=1, align='C')
+                        pdf.cell(32, 6, "VAT", border=1, align='R')
+                        pdf.cell(36, 6, "Wartość brutto", border=1, align='R', ln=1)
+                        
+                        pdf.set_x(65)
+                        pdf.set_font("Roboto", "", 9)
+                        pdf.cell(32, 6, f"{wartosc_netto:.2f}", border=1, align='R')
+                        pdf.cell(25, 6, f"{stawka_vat}%", border=1, align='C')
+                        pdf.cell(32, 6, f"{kwota_vat:.2f}", border=1, align='R')
+                        pdf.cell(36, 6, f"{wartosc_brutto:.2f}", border=1, align='R', ln=1)
+                        
+                        # Wiersz RAZEM
+                        pdf.set_x(40)
+                        pdf.set_font("Roboto", "B", 9)
+                        pdf.cell(25, 6, "Razem:", border=0, align='R')
+                        pdf.cell(32, 6, f"{wartosc_netto:.2f} PLN", border=1, align='R')
+                        pdf.cell(25, 6, "", border=1)
+                        pdf.cell(32, 6, f"{kwota_vat:.2f} PLN", border=1, align='R')
+                        pdf.cell(36, 6, f"{wartosc_brutto:.2f} PLN", border=1, align='R', ln=1)
+                        pdf.ln(4)
+                        
+                        # Uwagi
+                        if uwagi_doc.strip():
+                            pdf.set_font("Roboto", "B", 9)
+                            pdf.cell(15, 5, "Uwagi:", border=0, ln=0)
+                            pdf.set_font("Roboto", "", 9)
+                            pdf.cell(0, 5, uwagi_doc.strip(), border=0, ln=1)
+                        
+                        # 5. Podpisy (Dół strony)
+                        pdf.ln(25)
+                        pdf.set_font("Roboto", "", 8.5)
+                        pdf.cell(95, 5, "......................................................................", border=0, align='C', ln=0)
+                        pdf.cell(95, 5, "......................................................................", border=0, align='C', ln=1)
+                        pdf.cell(95, 4, "Odebrał", border=0, align='C', ln=0)
+                        pdf.cell(95, 4, f"Wystawił: {st.session_state.aktualny_uzytkownik}", border=0, align='C', ln=1)
+                        
                         pdf_bytes = bytes(pdf.output())
                         st.session_state.wygenerowane_pdf = pdf_bytes
                         
                         safe_name = nr_doc_wz.replace('/', '_')
                         st.session_state.nazwa_pliku_wz = f"{safe_name}.pdf"
-                        
                         st.rerun()
                     else:
                         st.error("Odrzucono: Niewystarczająca ilość asortymentu na magazynie.")
