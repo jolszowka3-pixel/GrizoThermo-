@@ -39,8 +39,8 @@ def pobierz_czcionki():
 # ==========================================
 # 1. INICJALIZACJA BAZY 
 # ==========================================
-if 'init_v18' not in st.session_state:
-    st.session_state.init_v18 = True
+if 'init_v19' not in st.session_state:
+    st.session_state.init_v19 = True
     st.session_state.wz_counter = 1
     
     st.session_state.uzytkownicy = {
@@ -101,15 +101,17 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-# CSS (Uproszczony dla kafelków)
+# Profesjonalny, oczyszczony styl CSS dla kafelków
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-        .metric-card { background-color: #f8f9fa; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); } 
-        .item-card { background-color: #ffffff; border-radius: 8px; padding: 14px; margin-bottom: 10px; border-left: 4px solid #205493; border: 1px solid #ddd; }
-        .item-card-purple { border-left: 4px solid #673ab7; }
-        .item-card-alert { border-left: 4px solid #d32f2f; }
-        .item-card-ok { border-left: 4px solid #2e7d32; }
+        .metric-card { background-color: #ffffff; border-radius: 6px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e5e7eb; } 
+        .item-card { background-color: #ffffff; border-radius: 6px; padding: 16px; margin-bottom: 12px; border: 1px solid #e5e7eb; border-left: 4px solid #1e40af; }
+        .item-card-purple { border-left: 4px solid #4b5563; }
+        .item-card-alert { border-left: 4px solid #dc2626; }
+        .item-card-ok { border-left: 4px solid #16a34a; }
+        .card-title { font-size: 1.05rem; font-weight: 600; color: #111827; margin-bottom: 4px; }
+        .card-details { font-size: 0.9rem; color: #6b7280; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -117,21 +119,21 @@ st.markdown("""
 # EKRAN LOGOWANIA
 # ==========================================
 if not st.session_state.zalogowany:
-    st.markdown("<h1 style='text-align: center; color: #205493;'>GrizoThermo+ | Logowanie</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #1e40af;'>GrizoThermo+ | Logowanie</h1>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         with st.form("logowanie"):
-            login = st.text_input("Login")
+            login = st.text_input("Identyfikator użytkownika")
             haslo = st.text_input("Hasło", type="password")
-            if st.form_submit_button("Zaloguj", use_container_width=True):
+            if st.form_submit_button("Zaloguj do systemu", use_container_width=True):
                 login = login.strip()
                 if login in st.session_state.uzytkownicy and st.session_state.uzytkownicy[login]["haslo"] == haslo:
                     st.session_state.zalogowany = True
                     st.session_state.aktualny_uzytkownik = st.session_state.uzytkownicy[login]["imie"]
                     st.session_state.aktualne_uprawnienia = st.session_state.uzytkownicy[login]["uprawnienia"]
                     st.rerun()
-                else: st.error("Błąd logowania")
+                else: st.error("Nieprawidłowy login lub hasło.")
     st.stop()
 
 # ==========================================
@@ -161,8 +163,8 @@ menu = st.sidebar.radio("Wybierz moduł:", opcje)
 if menu == "Pulpit Główny":
     st.header("Pulpit Zarządzania: GrizoThermo+")
     colA, colB = st.columns(2)
-    colA.metric("STAN MAGAZYNU (SUMA GOTOWYCH)", f"{int(st.session_state.produkty['Stan'].sum())} szt.")
-    colB.metric("MATERIAŁ DO KONFEKCJI (JUMBO)", f"{int(st.session_state.polprodukty.loc[0, 'Stan'])} szt.")
+    colA.metric("STAN MAGAZYNU (SUMA GOTOWYCH ROLEK)", f"{int(st.session_state.produkty['Stan'].sum())} szt.")
+    colB.metric("MATERIAŁ DO KONFEKCJI (ROLKA JUMBO)", f"{int(st.session_state.polprodukty.loc[0, 'Stan'])} szt.")
     
     st.divider()
     tab_prod, tab_polprod, tab_komp, tab_hist = st.tabs(["Wyroby Gotowe", "Półprodukty", "Surowce", "Historia Operacji"])
@@ -171,16 +173,17 @@ if menu == "Pulpit Główny":
         pokaz_wszystkie = st.checkbox("Pokaż warianty z zerowym stanem", value=True)
         for _, row in st.session_state.produkty.iterrows():
             if row['Stan'] > 0 or pokaz_wszystkie:
-                st.markdown(f'<div class="item-card"><b>📦 {row["Wariant"]}</b><br>Stan: {int(row["Stan"])} szt.</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="item-card"><div class="card-title">{row["Wariant"]}</div><div class="card-details">Stan magazynu: {int(row["Stan"])} szt.</div></div>', unsafe_allow_html=True)
 
     with tab_polprod:
         row_p = st.session_state.polprodukty.iloc[0]
-        st.markdown(f'<div class="item-card item-card-purple"><b>⚙️ {row_p["Nazwa"]}</b><br>Stan: {int(row_p["Stan"])} szt.</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="item-card item-card-purple"><div class="card-title">{row_p["Nazwa"]}</div><div class="card-details">Stan magazynu: {int(row_p["Stan"])} szt.</div></div>', unsafe_allow_html=True)
 
     with tab_komp:
         for _, row in st.session_state.komponenty.iterrows():
             alert = "item-card-alert" if row['Stan'] <= row['Min_Stan'] else "item-card-ok"
-            st.markdown(f'<div class="item-card {alert}"><b>🧱 {row["Nazwa"]}</b><br>Stan: {row["Stan"]:g} {row["Jednostka"]}</div>', unsafe_allow_html=True)
+            status_txt = "Niski stan" if row['Stan'] <= row['Min_Stan'] else "W normie"
+            st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan: {row["Stan"]:g} {row["Jednostka"]} ({status_txt})</div></div>', unsafe_allow_html=True)
 
     with tab_hist:
         st.dataframe(st.session_state.historia.sort_values(by="Data", ascending=False), use_container_width=True, hide_index=True)
@@ -201,34 +204,39 @@ elif menu == "Moduł Production":
         m_jumbo = min(m_alu, m_bia, m_zie)
 
         c1, c2, c3 = st.columns(3)
-        c1.metric("Alu wystarczy na:", f"{m_alu} szt.")
-        c2.metric("B. biały wystarczy na:", f"{m_bia} szt.")
-        c3.metric("B. zielony wystarczy na:", f"{m_zie} szt.")
+        c1.metric("Aluminium wystarczy na:", f"{m_alu} szt.")
+        c2.metric("Barwnik biały wystarczy na:", f"{m_bia} szt.")
+        c3.metric("Barwnik zielony wystarczy na:", f"{m_zie} szt.")
+        
+        st.divider()
         
         if m_jumbo > 0:
+            st.info(f"Z obecnych surowców możesz maksymalnie wytłoczyć: {m_jumbo} szt. Rolek Jumbo.")
             with st.form("prod_jumbo"):
                 ile_jumbo = st.number_input("Ile Rolek Jumbo wyprodukowano?", min_value=1, max_value=m_jumbo, value=1)
-                if st.form_submit_button("Zaksięguj produkcję"):
+                if st.form_submit_button("Zaksięguj produkcję z Maszyny Głównej"):
                     st.session_state.polprodukty.at[0, "Stan"] += ile_jumbo
-                    dodaj_ruch("PW", "Hala", "Rolka Jumbo (115cm x 13mb)", ile_jumbo, "Maszyna")
+                    nazwa_p = st.session_state.polprodukty.at[0, "Nazwa"]
+                    dodaj_ruch("PW (Półprod.)", "Hala Główna", nazwa_p, ile_jumbo, "Wytłaczarka")
                     
                     for k_id, zuzycie in st.session_state.receptura_baza.items():
                         idx = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == k_id][0]
                         st.session_state.komponenty.at[idx, "Stan"] -= (zuzycie * ile_jumbo)
-                        dodaj_ruch("RW", "Hala", st.session_state.komponenty.at[idx, "Nazwa"], zuzycie * ile_jumbo, "Maszyna")
-                    st.success("Wyprodukowano!")
+                        dodaj_ruch("RW", "Hala Główna", st.session_state.komponenty.at[idx, "Nazwa"], zuzycie * ile_jumbo, "Wytłaczarka")
+                    st.success("Produkcja została pomyślnie zaksięgowana.")
                     st.rerun()
         else:
-            st.error("Brak surowców na pełną rolkę Jumbo.")
+            st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
 
     with tab2:
         st.subheader("Konfekcja (Rozkrój bez odpadu)")
         s_jumbo = int(st.session_state.polprodukty.at[0, "Stan"])
         
         if s_jumbo > 0:
-            ile_tniemy = st.number_input("Ile Jumbo bierzesz do cięcia?", min_value=1, max_value=s_jumbo, value=1)
+            st.info(f"Dostępny zapas do cięcia: {s_jumbo} szt. rolek Jumbo.")
+            ile_tniemy = st.number_input("Ile rolek Jumbo bierzesz do cięcia z magazynu?", min_value=1, max_value=s_jumbo, value=1)
             wymagane_cm = ile_tniemy * 115
-            st.info(f"Do rozdysponowania: {wymagane_cm} cm")
+            st.markdown(f"Pocięcie {ile_tniemy} szt. Jumbo daje łącznie **{wymagane_cm} cm** szerokości.")
             
             c_okl, c_nie = st.columns(2)
             rozkroj = {}
@@ -238,69 +246,68 @@ elif menu == "Moduł Production":
                     
             zuzyte_cm = sum(rozkroj[idx] * st.session_state.produkty.at[idx, 'Szerokosc'] for idx in rozkroj)
             
+            st.divider()
+            
             if zuzyte_cm == wymagane_cm:
-                st.success("Rozkrój idealny!")
-                if st.button("Zatwierdź konfekcję"):
+                st.success(f"Suma szerokości: {zuzyte_cm} cm / {wymagane_cm} cm. Rozkrój idealny. Brak odpadu.")
+                if st.button("Zatwierdź rozkrój i zaktualizuj magazyny"):
                     st.session_state.polprodukty.at[0, "Stan"] -= ile_tniemy
-                    dodaj_ruch("RW", "Konfekcja", "Rolka Jumbo", ile_tniemy)
+                    dodaj_ruch("RW (Półprod.)", "Stanowisko Cięcia", "Rolka Jumbo (115cm x 13mb)", ile_tniemy, "Konfekcja")
                     for idx, ilosc in rozkroj.items():
                         if ilosc > 0:
                             st.session_state.produkty.at[idx, "Stan"] += ilosc
-                            dodaj_ruch("PW", "Konfekcja", st.session_state.produkty.at[idx, "Wariant"], ilosc)
+                            dodaj_ruch("PW (Gotowe)", "Stanowisko Cięcia", st.session_state.produkty.at[idx, "Wariant"], ilosc, "Konfekcja")
+                    st.success("Rozkrój pomyślnie zapisany w bazie.")
                     st.rerun()
             elif zuzyte_cm < wymagane_cm:
-                st.warning(f"Brakuje {wymagane_cm - zuzyte_cm} cm.")
+                st.warning(f"Suma szerokości wynosi {zuzyte_cm} cm. Rozdysponuj jeszcze {wymagane_cm - zuzyte_cm} cm.")
             else:
-                st.error(f"Przekroczono limit o {zuzyte_cm - wymagane_cm} cm!")
+                st.error(f"Suma szerokości wynosi {zuzyte_cm} cm. Przekroczono limit o {zuzyte_cm - wymagane_cm} cm!")
         else:
-            st.error("Brak Jumbo do cięcia!")
+            st.warning("Brak rolek Jumbo na magazynie. Wyprodukuj je w Kroku 1.")
 
 elif menu == "Baza Kontrahentów (CRM)":
     st.header("Baza Kontrahentów")
     zm = st.data_editor(st.session_state.kontrahenci, num_rows="dynamic", use_container_width=True, hide_index=True)
-    if st.button("Zapisz zmiany"):
+    if st.button("Zapisz zmiany w Bazie Kontrahentów"):
         st.session_state.kontrahenci = zm
-        st.success("Zapisano!")
+        st.success("Baza została zaktualizowana.")
         st.rerun()
 
 elif menu == "Przyjęcie Towaru (PZ)":
     st.header("Przyjęcie Zewnętrzne (PZ)")
     dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]["Nazwa"].tolist()
     if not dostawcy:
-        st.error("Brak dostawców w CRM.")
+        st.error("Brak dostawców w bazie danych CRM.")
     else:
         with st.form("pz"):
-            n = st.text_input("Numer")
-            d = st.selectbox("Dostawca", dostawcy)
-            k = st.selectbox("Surowiec", st.session_state.komponenty["Nazwa"].tolist())
-            i = st.number_input("Ilość", min_value=0.1, value=100.0)
-            if st.form_submit_button("Zatwierdź PZ"):
+            n = st.text_input("Numer dokumentu (np. nr faktury zakupu)")
+            d = st.selectbox("Dostawca surowca", dostawcy)
+            k = st.selectbox("Wybierz surowiec", st.session_state.komponenty["Nazwa"].tolist())
+            i = st.number_input("Ilość przyjmowana", min_value=0.1, value=100.0)
+            if st.form_submit_button("Zatwierdź dokument PZ"):
                 idx = st.session_state.komponenty.index[st.session_state.komponenty["Nazwa"] == k][0]
                 st.session_state.komponenty.at[idx, "Stan"] += i
                 dodaj_ruch("PZ", n, k, i, d)
-                st.success("Zapisano!")
+                st.success("Zapisano przyjęcie zewnętrzne.")
                 st.rerun()
 
-# ------------------------------------------
-# ZMODYFIKOWANY MODUŁ WZ (WYDAWANIE MULTI-PRODUKTÓW)
-# ------------------------------------------
 elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
     
     if "wygenerowane_pdf" in st.session_state:
-        st.success(f"Transakcja zaksięgowana. Dokument gotowy do pobrania.")
+        st.success("Transakcja zaksięgowana. Dokument gotowy do pobrania.")
         c1, c2 = st.columns(2)
-        c1.download_button("📄 Pobierz WZ (.pdf)", data=st.session_state.wygenerowane_pdf, file_name=st.session_state.nazwa_pliku_wz, mime="application/pdf", use_container_width=True)
-        if c2.button("⬅️ Wystaw nowy dokument", use_container_width=True):
+        c1.download_button("Pobierz dokument WZ (.pdf)", data=st.session_state.wygenerowane_pdf, file_name=st.session_state.nazwa_pliku_wz, mime="application/pdf", use_container_width=True)
+        if c2.button("Wystaw nowy dokument WZ", use_container_width=True):
             del st.session_state.wygenerowane_pdf
             del st.session_state.nazwa_pliku_wz
             st.rerun()
             
     elif not odbiorcy:
-        st.warning("Brak odbiorców w bazie! Przejdź do zakładki CRM.")
+        st.warning("Brak odbiorców w bazie danych CRM.")
     else:
-        # Filtrujemy tylko te warianty, które aktualnie są na stanie magazynu (> 0)
         dostepne_produkty = st.session_state.produkty[st.session_state.produkty["Stan"] > 0].copy()
         
         if dostepne_produkty.empty:
@@ -321,7 +328,6 @@ elif menu == "Wydanie Towaru (WZ)":
                 st.divider()
                 st.subheader("2. Koszyk Wydania: Zaznacz produkty i ilości")
                 
-                # Przygotowanie tabeli (Koszyka)
                 df_do_edycji = dostepne_produkty[["Wariant", "Stan"]].copy()
                 df_do_edycji["Wydajemy (szt.)"] = 0
                 
@@ -332,23 +338,21 @@ elif menu == "Wydanie Towaru (WZ)":
                     column_config={
                         "Wariant": st.column_config.TextColumn("Nazwa asortymentu", disabled=True),
                         "Stan": st.column_config.NumberColumn("Dostępne na magazynie", disabled=True),
-                        "Wydajemy (szt.)": st.column_config.NumberColumn("Ilość do wydania ✏️", min_value=0, step=1)
+                        "Wydajemy (szt.)": st.column_config.NumberColumn("Ilość do wydania", min_value=0, step=1)
                     }
                 )
 
-                if st.form_submit_button("Zatwierdź, Zdejmij z Magazynu i Generuj PDF"):
-                    # Filtrujemy tylko te wiersze, gdzie użytkownik wpisał ilość > 0
+                if st.form_submit_button("Zatwierdź wydanie i generuj PDF"):
                     wybrane_do_wydania = zmienione_dane[zmienione_dane["Wydajemy (szt.)"] > 0]
                     bledy = False
                     
                     if wybrane_do_wydania.empty:
-                        st.error("Musisz wpisać ilość większą niż 0 dla co najmniej jednego wariantu!")
+                        st.error("Wprowadź ilość większą niż 0 dla przynajmniej jednego produktu.")
                         bledy = True
                     
-                    # Weryfikacja, czy użytkownik nie wpisał więcej niż ma na stanie
                     for _, row in wybrane_do_wydania.iterrows():
                         if row["Wydajemy (szt.)"] > row["Stan"]:
-                            st.error(f"Błąd! Próbujesz wydać {row['Wydajemy (szt.)']} szt. wariantu '{row['Wariant']}', a masz tylko {int(row['Stan'])} szt.")
+                            st.error(f"Niewystarczający zapas dla wariantu '{row['Wariant']}'. Dostępne: {int(row['Stan'])} szt.")
                             bledy = True
                             
                     if not bledy:
@@ -403,28 +407,22 @@ elif menu == "Wydanie Towaru (WZ)":
                         
                         pdf.set_font("Roboto", "", 9)
                         
-                        # --- PĘTLA PO WYBRANYCH PRODUKTACH ---
                         lp = 1
                         for _, row in wybrane_do_wydania.iterrows():
                             nazwa_w = row["Wariant"]
                             ile_w = int(row["Wydajemy (szt.)"])
                             
-                            # 1. Dodajemy do PDF
                             pdf.cell(15, 8, str(lp), border=1, align='C')
                             pdf.cell(115, 8, nazwa_w, border=1, align='L')
                             pdf.cell(30, 8, str(ile_w), border=1, align='C')
                             pdf.cell(30, 8, "szt.", border=1, align='C', ln=1)
                             
-                            # 2. Zdejmujemy ze stanu głównego bazy
                             idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
                             st.session_state.produkty.at[idx, "Stan"] -= ile_w
                             
-                            # 3. Zapisujemy w historii
                             dodaj_ruch("WZ", nr_wz_auto, nazwa_w, ile_w, wybrany_klient)
-                            
                             lp += 1
                         
-                        # Zwiększenie numeru WZ po poprawnym wydaniu
                         st.session_state.wz_counter += 1
                         
                         pdf.ln(10)
@@ -453,11 +451,10 @@ elif menu == "Wydanie Towaru (WZ)":
 
 elif menu == "Panel Administracyjny":
     st.header("Narzędzia Administracyjne")
-    # Tabela z użytkownikami, korekty itp.
-    tab_uzytkownicy, tab_korekt_surowce, tab_korekt_prod = st.tabs(["Konta", "Korekty Surowców", "Korekty Gotowych"])
+    tab_uzytkownicy, tab_korekt_surowce, tab_korekt_prod = st.tabs(["Konta Użytkowników", "Korekta Surowców", "Korekta Wyrobów Gotowych"])
     
     with tab_uzytkownicy:
-        st.write("Aby dodać konto, wypełnij dół.")
+        st.write("Wprowadź dane, aby wygenerować profil pracownika.")
         with st.form("dodaj_uzytkownika"):
             c1, c2 = st.columns(2)
             login = c1.text_input("Login")
@@ -475,18 +472,20 @@ elif menu == "Panel Administracyjny":
                         "haslo": haslo, "imie": imie,
                         "uprawnienia": {"produkcja": u_prod, "pz": u_pz, "wz": u_wz, "admin": u_admin}
                     }
-                    st.success("Konto utworzone!")
+                    st.success("Konto zostało pomyślnie utworzone.")
                     st.rerun()
-                else: st.error("Wypełnij wszystkie pola.")
+                else: st.error("Wszystkie pola formularza są wymagane.")
 
     with tab_korekt_surowce:
         zm_k = st.data_editor(st.session_state.komponenty, hide_index=True, use_container_width=True)
-        if st.button("Zapisz surowce"):
+        if st.button("Zapisz korektę surowców"):
             st.session_state.komponenty = zm_k
+            st.success("Korekta surowców pomyślnie zapisana.")
             st.rerun()
 
     with tab_korekt_prod:
         zm_p = st.data_editor(st.session_state.produkty, hide_index=True, use_container_width=True)
-        if st.button("Zapisz produkty gotowe"):
+        if st.button("Zapisz korektę produktów gotowych"):
             st.session_state.produkty = zm_p
+            st.success("Korekta wyrobów gotowych pomyślnie zapisana.")
             st.rerun()
