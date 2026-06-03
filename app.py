@@ -4,8 +4,6 @@ from datetime import datetime
 import os
 import urllib.request
 from fpdf import FPDF
-import base64
-import streamlit.components.v1 as components
 
 # Konfiguracja strony
 st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
@@ -39,165 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# FUNKCJE GENERUJĄCE PROSTE PDF DLA HALI
+# 1. INICJALIZACJA BAZY (WERSJA V47)
 # ==========================================
-def create_pdf_jumbo(nr_dok, ile_jumbo, surowce_lista, uzytkownik):
-    font_path, font_bold_path = pobierz_czcionki()
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.add_font("Roboto", "", font_path)
-    pdf.add_font("Roboto", "B", font_bold_path)
-    
-    pdf.set_fill_color(220, 230, 245)
-    pdf.set_font("Roboto", "B", 16)
-    pdf.cell(0, 12, f"ZLECENIE PRODUKCYJNE: WYTŁACZANIE", border=1, ln=1, align='C', fill=True)
-    pdf.set_font("Roboto", "B", 11)
-    pdf.cell(100, 8, f" NR ZLECENIA: {nr_dok}", border=1)
-    pdf.set_font("Roboto", "", 10)
-    pdf.cell(0, 8, f" Data wygenerowania: {datetime.now().strftime('%Y-%m-%d %H:%M')}", border=1, ln=1)
-    pdf.ln(5)
-    
-    pdf.set_font("Roboto", "B", 12)
-    pdf.set_fill_color(200, 220, 255)
-    pdf.cell(0, 10, f" DO WYPRODUKOWANIA: {ile_jumbo} szt. Rolek Jumbo (115cm x 13mb)", border=1, ln=1, fill=True)
-    pdf.ln(5)
-    
-    pdf.set_font("Roboto", "B", 11)
-    pdf.cell(0, 8, " POBIERZ Z MAGAZYNU SUROWCÓW:", border="B", ln=1)
-    
-    pdf.set_font("Roboto", "B", 10)
-    pdf.cell(120, 8, " Surowiec / Komponent", border=1, align='L')
-    pdf.cell(0, 8, " Ilość do pobrania", border=1, align='C', ln=1)
-    
-    pdf.set_font("Roboto", "", 10)
-    for sur in surowce_lista:
-        pdf.cell(120, 8, f" {sur['nazwa']}", border=1, align='L')
-        pdf.cell(0, 8, f"{sur['ilosc']:g} {sur['jm']}", border=1, align='C', ln=1)
-    pdf.ln(15)
-    
-    pdf.set_font("Roboto", "", 9)
-    pdf.cell(95, 5, "..........................................................", align='C')
-    pdf.cell(95, 5, "..........................................................", align='C', ln=1)
-    pdf.cell(95, 5, f"Zlecił: {uzytkownik}", align='C')
-    pdf.cell(95, 5, "Podpis operatora (Zrobione)", align='C', ln=1)
-    
-    return bytes(pdf.output())
-
-def create_pdf_konfekcja(nr_dok, zuzyto_jumbo, szablony, zsumowane_wyroby, uzytkownik):
-    font_path, font_bold_path = pobierz_czcionki()
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.add_font("Roboto", "", font_path)
-    pdf.add_font("Roboto", "B", font_bold_path)
-    
-    pdf.set_fill_color(220, 245, 230)
-    pdf.set_font("Roboto", "B", 16)
-    pdf.cell(0, 12, f"ZLECENIE PRODUKCYJNE: CIĘCIE WZDŁUŻNE", border=1, ln=1, align='C', fill=True)
-    pdf.set_font("Roboto", "B", 11)
-    pdf.cell(100, 8, f" NR ZLECENIA: {nr_dok}", border=1)
-    pdf.set_font("Roboto", "", 10)
-    pdf.cell(0, 8, f" Data wygenerowania: {datetime.now().strftime('%Y-%m-%d %H:%M')}", border=1, ln=1)
-    pdf.ln(5)
-    
-    pdf.set_font("Roboto", "B", 13)
-    pdf.set_fill_color(200, 220, 255)
-    pdf.cell(0, 10, f" POBIERZ Z MAGAZYNU: {zuzyto_jumbo} szt. Rolek Jumbo (szer. 115cm)", border=1, ln=1, fill=True)
-    pdf.ln(5)
-    
-    pdf.set_font("Roboto", "B", 11)
-    pdf.cell(0, 8, " INSTRUKCJA CIĘCIA (USTAWIENIE NOŻY):", border="B", ln=1)
-    pdf.ln(2)
-    
-    for i, szablon in enumerate(szablony):
-        pdf.set_font("Roboto", "B", 11)
-        pdf.set_fill_color(240, 240, 240)
-        pdf.cell(0, 8, f" SZABLON {i+1}  ---  Weź {szablon['ile']} szt. Jumbo i każdą z nich potnij na:", border=1, ln=1, fill=True)
-        
-        pdf.set_font("Roboto", "B", 10)
-        pdf.cell(70, 6, "Szerokość paska", border="L")
-        pdf.cell(40, 6, "Ile takich pasków?", align="C")
-        pdf.cell(0, 6, "Suma cm", border="R", align="C", ln=1)
-        
-        pdf.set_font("Roboto", "", 10)
-        suma_cm = 0
-        for n, q in szablon["wzor"].items():
-            try: szer = int(n.split('cm')[0].split(' ')[-1])
-            except: szer = 0
-            suma_cm += szer * q
-            
-            pdf.cell(70, 6, f" {szer} cm", border="L")
-            pdf.cell(40, 6, f"{q} szt.", align="C")
-            pdf.cell(0, 6, f"{szer * q} cm", border="R", align="C", ln=1)
-            
-        pdf.set_font("Roboto", "", 9) # ZMIANA: Z "I" (kursywa) na "" (normalna czcionka), by uniknąć błędu FPDFException
-        odpad = 115 - suma_cm
-        pdf.cell(0, 6, f" *Wykorzystano {suma_cm} cm z 115 cm. Odpad/ścinka: {odpad} cm.", border="LRB", ln=1)
-        pdf.ln(4)
-        
-    pdf.set_font("Roboto", "B", 11)
-    pdf.cell(0, 8, " PODSUMOWANIE (TYLE SZTUK ZJEDZIE Z MASZYNY):", border="B", ln=1)
-    pdf.set_font("Roboto", "B", 9)
-    pdf.cell(150, 8, " Asortyment Gotowy", border=1, align='L')
-    pdf.cell(40, 8, " Łączna Ilość", border=1, align='C', ln=1)
-    pdf.set_font("Roboto", "", 9)
-    for n, q in zsumowane_wyroby.items():
-        pdf.cell(150, 8, f" {n}", border=1, align='L')
-        pdf.cell(40, 8, f"{q} szt.", border=1, align='C', ln=1)
-        
-    pdf.ln(15)
-    pdf.set_font("Roboto", "", 9)
-    pdf.cell(95, 5, "..........................................................", align='C')
-    pdf.cell(95, 5, "..........................................................", align='C', ln=1)
-    pdf.cell(95, 5, f"Zlecił: {uzytkownik}", align='C')
-    pdf.cell(95, 5, "Podpis operatora (Zrobione)", align='C', ln=1)
-    
-    return bytes(pdf.output())
-
-def create_pdf_oklejanie(nr_dok, operacje, uzytkownik):
-    font_path, font_bold_path = pobierz_czcionki()
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.add_font("Roboto", "", font_path)
-    pdf.add_font("Roboto", "B", font_bold_path)
-    
-    pdf.set_fill_color(245, 230, 220)
-    pdf.set_font("Roboto", "B", 16)
-    pdf.cell(0, 12, f"ZLECENIE PRODUKCYJNE: OKLEJANIE", border=1, ln=1, align='C', fill=True)
-    pdf.set_font("Roboto", "B", 11)
-    pdf.cell(100, 8, f" NR ZLECENIA: {nr_dok}", border=1)
-    pdf.set_font("Roboto", "", 10)
-    pdf.cell(0, 8, f" Data wygenerowania: {datetime.now().strftime('%Y-%m-%d %H:%M')}", border=1, ln=1)
-    pdf.ln(8)
-    
-    pdf.set_font("Roboto", "B", 11)
-    pdf.cell(0, 8, " INSTRUKCJA (CO NALEŻY OKLEIĆ):", border="B", ln=1)
-    pdf.ln(2)
-    
-    pdf.set_font("Roboto", "B", 10)
-    pdf.cell(85, 8, " Weź z magazynu (Nieoklejone)", border=1)
-    pdf.cell(85, 8, " Naklej taśmę i odłóż jako:", border=1)
-    pdf.cell(0, 8, " Ilość", border=1, align='C', ln=1)
-    
-    pdf.set_font("Roboto", "", 10)
-    for op in operacje:
-        pdf.cell(85, 8, f" {op['z']}", border=1)
-        pdf.cell(85, 8, f" {op['do']}", border=1)
-        pdf.cell(0, 8, f"{op['ilosc']} szt.", border=1, align='C', ln=1)
-    
-    pdf.ln(15)
-    pdf.set_font("Roboto", "", 9)
-    pdf.cell(95, 5, "..........................................................", align='C')
-    pdf.cell(95, 5, "..........................................................", align='C', ln=1)
-    pdf.cell(95, 5, f"Zlecił: {uzytkownik}", align='C')
-    pdf.cell(95, 5, "Podpis operatora (Zrobione)", align='C', ln=1)
-    
-    return bytes(pdf.output())
-
-# ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V46)
-# ==========================================
-if 'init_v46' not in st.session_state:
-    st.session_state.init_v46 = True
+if 'init_v47' not in st.session_state:
+    st.session_state.init_v47 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -253,15 +96,16 @@ if 'init_v46' not in st.session_state:
     ])
     
     st.session_state.archiwum_wz_pdf = []
-    st.session_state.archiwum_jumbo_pdf = []
-    st.session_state.archiwum_konf_pdf = []
-    st.session_state.archiwum_okl_pdf = []
+    # Usunięto tablice PDF dla poszczególnych procesów, zostawiamy tylko logi operacji
+    st.session_state.log_jumbo = []
+    st.session_state.log_konf = []
+    st.session_state.log_okl = []
+    
     st.session_state.wz_koszyk = []
     st.session_state.konf_koszyk = []
     st.session_state.zamowienia = []
     st.session_state.powiazane_zk = None
     st.session_state.wybrany_klient_wz = None
-    st.session_state.do_pobrania = []
 
 def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     uzytkownik = st.session_state.aktualny_uzytkownik if st.session_state.aktualny_uzytkownik else "System"
@@ -272,7 +116,7 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-# CSS Corporate Style
+# CSS
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
@@ -285,23 +129,6 @@ st.markdown("""
         .card-details { font-size: 0.9rem; color: #6b7280; }
     </style>
 """, unsafe_allow_html=True)
-
-# ==========================================
-# MECHANIZM AUTOMATYCZNEGO POBIERANIA PLIKÓW
-# ==========================================
-if "do_pobrania" in st.session_state and st.session_state.do_pobrania:
-    for plik in st.session_state.do_pobrania:
-        b64 = base64.b64encode(plik["data"]).decode()
-        html = f'''
-        <a id="auto_dl_{plik['nazwa']}" href="data:application/pdf;base64,{b64}" download="{plik['nazwa']}"></a>
-        <script>document.getElementById('auto_dl_{plik['nazwa']}').click();</script>
-        '''
-        components.html(html, height=0)
-    st.session_state.do_pobrania = []
-
-if "powiadomienie_sukces" in st.session_state:
-    st.success(st.session_state.powiadomienie_sukces)
-    del st.session_state.powiadomienie_sukces
 
 # ==========================================
 # EKRAN LOGOWANIA
@@ -438,6 +265,21 @@ elif menu == "Stan Magazynu":
 elif menu == "Zamówienia (ZK)":
     st.header("Zamówienia Klientów (ZK)")
     
+    if "zk_pdf_do_pobrania" in st.session_state:
+        st.success("Zestawienie wygenerowane pomyślnie. Pobierz dokument poniżej:")
+        st.download_button(
+            label="📥 Pobierz Zbiorczą Listę Zamówień (PDF)",
+            data=st.session_state.zk_pdf_do_pobrania["data"],
+            file_name=st.session_state.zk_pdf_do_pobrania["nazwa"],
+            mime="application/pdf",
+            type="primary",
+            use_container_width=True
+        )
+        if st.button("Ukryj powiadomienie", use_container_width=True):
+            del st.session_state.zk_pdf_do_pobrania
+            st.rerun()
+        st.divider()
+
     tab_nowe, tab_lista, tab_wydruk = st.tabs(["Wprowadź Nowe Zamówienie", "Rejestr Zamówień", "Generuj Listę (PDF)"])
 
     with tab_nowe:
@@ -481,7 +323,7 @@ elif menu == "Zamówienia (ZK)":
                             "Status": "Oczekujące"
                         })
                         st.session_state.zk_counter += 1
-                        st.session_state.powiadomienie_sukces = f"Zamówienie {nr_zk_auto} zostało przyjęte w systemie."
+                        st.success(f"Zamówienie {nr_zk_auto} zostało przyjęte w systemie.")
                         st.rerun()
 
     with tab_lista:
@@ -501,7 +343,7 @@ elif menu == "Zamówienia (ZK)":
     with tab_wydruk:
         st.subheader("Wydruk Zbiorczej Listy Zamówień")
         st.write("Generuj zestawienie wszystkich zarejestrowanych zamówień do celów ewidencyjnych.")
-        if st.button("Generuj i Pobierz PDF", type="primary"):
+        if st.button("Generuj listę zamówień (PDF)", type="primary"):
             if not st.session_state.zamowienia:
                 st.error("Brak zamówień do wygenerowania raportu.")
             else:
@@ -534,8 +376,7 @@ elif menu == "Zamówienia (ZK)":
                         pdf.set_font("Roboto", "", 9)
                     pdf.ln(3)
                 
-                st.session_state.do_pobrania.append({"nazwa": "Zbiorcza_Lista_Zamowien.pdf", "data": bytes(pdf.output())})
-                st.session_state.powiadomienie_sukces = "Wygenerowano raport PDF. Pobieranie rozpoczęte."
+                st.session_state.zk_pdf_do_pobrania = {"nazwa": "Zbiorcza_Lista_Zamowien.pdf", "data": bytes(pdf.output())}
                 st.rerun()
 
 # ==========================================
@@ -544,9 +385,7 @@ elif menu == "Zamówienia (ZK)":
 elif menu == "Moduł Production":
     st.header("Zarządzanie Produkcją i Planowanie")
     
-    # ----------------------------------------------------
-    # GŁÓWNY SILNIK KALKULACYJNY MRP
-    # ----------------------------------------------------
+    # SILNIK MRP
     oczekujace = [z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"]
     mrp_data = None
     
@@ -650,10 +489,6 @@ elif menu == "Moduł Production":
             else:
                 zliczone_szablony[klucz]["ile"] += 1
                 
-        szablony_lista_pdf = []
-        for _, dane in zliczone_szablony.items():
-            szablony_lista_pdf.append(dane)
-                
         mrp_data = {
             "braki_okl": braki_do_oklejenia,
             "braki_nie": braki_do_rozkroju,
@@ -662,26 +497,23 @@ elif menu == "Moduł Production":
             "brakuje_jumbo": brakuje_jumbo,
             "req_alu": req_alu, "req_bia": req_bia, "req_zie": req_zie,
             "szablony": zliczone_szablony,
-            "szablony_lista_pdf": szablony_lista_pdf,
             "plan_rolek": plan_rolek,
             "gotowe_do_auto": gotowe_do_auto
         }
 
-    if "wygenerowane_raporty_prod" in st.session_state and st.session_state.wygenerowane_raporty_prod:
-        st.success("Operacja zakończona sukcesem! Twoje pliki PDF są gotowe do ponownego pobrania (opcjonalnie):")
-        num_docs = len(st.session_state.wygenerowane_raporty_prod)
-        cols = st.columns(num_docs + 1)
-        for i, doc in enumerate(st.session_state.wygenerowane_raporty_prod):
-            cols[i].download_button(
-                label=f"📄 Pobierz {doc['nazwa']}",
-                data=doc['pdf'],
-                file_name=doc['nazwa'],
-                mime="application/pdf",
-                use_container_width=True,
-                key=f"btn_dl_prod_{i}_{doc['nazwa']}"
-            )
-        if cols[-1].button("Zamknij panel", use_container_width=True):
-            del st.session_state.wygenerowane_raporty_prod
+    # Powiadomienia operacyjne - ODPORNE NA BLOKADY
+    if "plan_hali_do_pobrania" in st.session_state:
+        st.success("Wygenerowano kompleksowy plan produkcji dla hali.")
+        st.download_button(
+            label="📥 Pobierz Plan dla Hali (PDF)",
+            data=st.session_state.plan_hali_do_pobrania["data"],
+            file_name=st.session_state.plan_hali_do_pobrania["nazwa"],
+            mime="application/pdf",
+            type="primary",
+            use_container_width=True
+        )
+        if st.button("Zamknij powiadomienie", use_container_width=True):
+            del st.session_state.plan_hali_do_pobrania
             st.rerun()
         st.divider()
 
@@ -732,9 +564,8 @@ elif menu == "Moduł Production":
                     
                 st.divider()
                 if mrp_data["gotowe_do_auto"]:
-                    if st.button("Zleć i Zrealizuj Automatycznie (Wszystkie 3 kroki)", type="primary", use_container_width=True):
+                    if st.button("Zleć i Zrealizuj Automatycznie w Systemie (Aktualizacja Stanów)", type="primary", use_container_width=True):
                         data_dzis_str = datetime.now().strftime("%Y/%m/%d")
-                        raporty_generowane = []
                         
                         # 1. AUTO WYTŁACZANIE
                         if mrp_data["brakuje_jumbo"] > 0:
@@ -743,20 +574,13 @@ elif menu == "Moduł Production":
                             st.session_state.polprodukty.at[0, "Stan"] += bj
                             dodaj_ruch("PW (Półprod.)", nr_jmb_auto, st.session_state.polprodukty.at[0, "Nazwa"], bj, "Auto-Planer")
                             
-                            surowce_zuzyte = []
                             for k_id, zuzycie in st.session_state.receptura_baza.items():
                                 idx = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == k_id][0]
                                 laczne_zuzycie = zuzycie * bj
-                                nazwa_sur = st.session_state.komponenty.at[idx, "Nazwa"]
-                                jm_sur = st.session_state.komponenty.at[idx, "Jednostka"]
                                 st.session_state.komponenty.at[idx, "Stan"] -= laczne_zuzycie
-                                dodaj_ruch("RW", nr_jmb_auto, nazwa_sur, laczne_zuzycie, "Auto-Planer")
-                                surowce_zuzyte.append({"nazwa": nazwa_sur, "ilosc": laczne_zuzycie, "jm": jm_sur})
+                                dodaj_ruch("RW", nr_jmb_auto, st.session_state.komponenty.at[idx, "Nazwa"], laczne_zuzycie, "Auto-Planer")
                             
-                            b_pdf_jmb = create_pdf_jumbo(nr_jmb_auto, bj, surowce_zuzyte, "System Auto-Planer")
-                            st.session_state.archiwum_jumbo_pdf.append({"id": nr_jmb_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "ilosc": bj, "pdf": b_pdf_jmb})
-                            raporty_generowane.append({"nazwa": f"{nr_jmb_auto.replace('/', '_')}.pdf", "pdf": b_pdf_jmb})
-                            st.session_state.do_pobrania.append({"nazwa": f"{nr_jmb_auto.replace('/', '_')}.pdf", "data": b_pdf_jmb})
+                            st.session_state.log_jumbo.append({"id": nr_jmb_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "ilosc": bj})
                             st.session_state.jumbo_counter += 1
                             
                         # 2. AUTO ROZKRÓJ
@@ -776,17 +600,12 @@ elif menu == "Moduł Production":
                                 st.session_state.produkty.at[idx, "Stan"] += total_qty
                                 dodaj_ruch("PW (Gotowe)", nr_knf_auto, nazwa_gotowego, total_qty, "Auto-Planer")
                             
-                            b_pdf_knf = create_pdf_konfekcja(nr_knf_auto, pj, mrp_data["szablony_lista_pdf"], total_produced, "System Auto-Planer")
-                            st.session_state.archiwum_konf_pdf.append({"id": nr_knf_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "jumbo_szt": pj, "pdf": b_pdf_knf})
-                            raporty_generowane.append({"nazwa": f"{nr_knf_auto.replace('/', '_')}.pdf", "pdf": b_pdf_knf})
-                            st.session_state.do_pobrania.append({"nazwa": f"{nr_knf_auto.replace('/', '_')}.pdf", "data": b_pdf_knf})
+                            st.session_state.log_konf.append({"id": nr_knf_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "jumbo_szt": pj})
                             st.session_state.konf_counter += 1
 
                         # 3. AUTO OKLEJANIE
                         if mrp_data["braki_okl"]:
                             nr_okl_auto = f"PR-OKL/{data_dzis_str}/{st.session_state.okl_counter:03d}"
-                            op_list = []
-                            
                             for b in mrp_data["braki_okl"]:
                                 idx_nie = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == b["Z_czego"]][0]
                                 idx_okl = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == b["Wariant"]][0]
@@ -796,29 +615,22 @@ elif menu == "Moduł Production":
                                 
                                 dodaj_ruch("RW", nr_okl_auto, b["Z_czego"], b["Brak_szt"], "Auto-Planer")
                                 dodaj_ruch("PW (Gotowe)", nr_okl_auto, b["Wariant"], b["Brak_szt"], "Auto-Planer")
-                                op_list.append({"z": b["Z_czego"], "do": b["Wariant"].split(" - ")[0], "ilosc": b["Brak_szt"]})
                             
-                            b_pdf_okl = create_pdf_oklejanie(nr_okl_auto, op_list, "System Auto-Planer")
-                            st.session_state.archiwum_okl_pdf.append({"id": nr_okl_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "opis": "Proces oklejania 1-Click", "pdf": b_pdf_okl})
-                            raporty_generowane.append({"nazwa": f"{nr_okl_auto.replace('/', '_')}.pdf", "pdf": b_pdf_okl})
-                            st.session_state.do_pobrania.append({"nazwa": f"{nr_okl_auto.replace('/', '_')}.pdf", "data": b_pdf_okl})
+                            st.session_state.log_okl.append({"id": nr_okl_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "opis": "Proces oklejania automatyczny"})
                             st.session_state.okl_counter += 1
 
-                        st.session_state.wygenerowane_raporty_prod = raporty_generowane
-                        st.session_state.powiadomienie_sukces = "Cały łańcuch produkcyjny zrealizowany! Karty pobierają się w tle."
-                        st.rerun()
+                        st.success("System automatycznie zaktualizował stany magazynowe w oparciu o plan.")
                 else:
                     st.button("Zleć i Zrealizuj Automatycznie", disabled=True, use_container_width=True)
 
-    # --- ZAKŁADKA 0.5: WYDRUK DLA HALI ---
     with tab_wydruk:
         st.subheader("Kompleksowy Plan dla Hali Produkcyjnej")
-        st.write("Wygeneruj jeden wspólny, czytelny dokument PDF dla operatorów maszyn, zawierający wytyczne dla całego procesu na dany dzień.")
+        st.write("Wygeneruj jeden wspólny dokument PDF dla operatorów maszyn.")
         
         if not mrp_data or (not mrp_data["braki_okl"] and not mrp_data["braki_nie"]):
             st.info("Brak zadań produkcyjnych do wygenerowania na karcie.")
         else:
-            if st.button("Drukuj i Pobierz Kompleksowy Plan Produkcji (PDF)", use_container_width=True):
+            if st.button("Generuj Kompleksowy Plan Produkcji (PDF)", type="primary"):
                 font_path, font_bold_path = pobierz_czcionki()
                 pdf = FPDF()
                 pdf.add_page()
@@ -905,10 +717,7 @@ elif menu == "Moduł Production":
                     pdf.set_font("Roboto", "", 10)
                     pdf.cell(0, 8, "Brak zaleceń oklejania na tę zmianę.", ln=1)
                 
-                b_pdf = bytes(pdf.output())
-                st.session_state.do_pobrania.append({"nazwa": "Plan_Dla_Hali.pdf", "data": b_pdf})
-                st.session_state.wygenerowane_raporty_prod = [{"nazwa": "Plan_Dla_Hali.pdf", "pdf": b_pdf}]
-                st.session_state.powiadomienie_sukces = "Wygenerowano raport Planu. Pobieranie rozpoczęte."
+                st.session_state.plan_hali_do_pobrania = {"nazwa": "Plan_Dla_Hali.pdf", "data": bytes(pdf.output())}
                 st.rerun()
 
     with tab1:
@@ -932,7 +741,7 @@ elif menu == "Moduł Production":
         if m_jumbo > 0:
             with st.form("prod_jumbo"):
                 ile_jumbo = st.number_input("Ile Rolek Jumbo wyprodukowano?", min_value=1, max_value=m_jumbo, value=1)
-                if st.form_submit_button("Zaksięguj i Pobierz Kartę"):
+                if st.form_submit_button("Zaksięguj produkcję (aktualizacja stanów)"):
                     data_dzis_str = datetime.now().strftime("%Y/%m/%d")
                     nr_jmb_auto = f"PR-JMB/{data_dzis_str}/{st.session_state.jumbo_counter:03d}"
                     
@@ -940,29 +749,20 @@ elif menu == "Moduł Production":
                     nazwa_p = st.session_state.polprodukty.at[0, "Nazwa"]
                     dodaj_ruch("PW (Półprod.)", nr_jmb_auto, nazwa_p, ile_jumbo, "Wytłaczarka")
                     
-                    surowce_zuzyte = []
                     for k_id, zuzycie in st.session_state.receptura_baza.items():
                         idx = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == k_id][0]
                         laczne_zuzycie = zuzycie * ile_jumbo
-                        nazwa_sur = st.session_state.komponenty.at[idx, "Nazwa"]
-                        jm_sur = st.session_state.komponenty.at[idx, "Jednostka"]
                         st.session_state.komponenty.at[idx, "Stan"] -= laczne_zuzycie
-                        dodaj_ruch("RW", nr_jmb_auto, nazwa_sur, laczne_zuzycie, "Wytłaczarka")
-                        surowce_zuzyte.append({"nazwa": nazwa_sur, "ilosc": laczne_zuzycie, "jm": jm_sur})
+                        dodaj_ruch("RW", nr_jmb_auto, st.session_state.komponenty.at[idx, "Nazwa"], laczne_zuzycie, "Wytłaczarka")
                     
-                    b_pdf_jmb = create_pdf_jumbo(nr_jmb_auto, ile_jumbo, surowce_zuzyte, st.session_state.aktualny_uzytkownik)
-                    st.session_state.archiwum_jumbo_pdf.append({"id": nr_jmb_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "ilosc": ile_jumbo, "pdf": b_pdf_jmb})
-                    
+                    st.session_state.log_jumbo.append({"id": nr_jmb_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "ilosc": ile_jumbo})
                     st.session_state.jumbo_counter += 1
-                    st.session_state.do_pobrania.append({"nazwa": f"{nr_jmb_auto.replace('/', '_')}.pdf", "data": b_pdf_jmb})
-                    st.session_state.wygenerowane_raporty_prod = [{"nazwa": f"{nr_jmb_auto.replace('/', '_')}.pdf", "pdf": b_pdf_jmb}]
-                    st.session_state.powiadomienie_sukces = "Karta Jumbo wygenerowana i pobrana."
-                    st.rerun()
+                    st.success("Zaksięgowano z sukcesem.")
         else:
             st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
 
     with tab2:
-        st.subheader("Konfekcja (Tworzenie Zlecenia Rozkroju) - RĘCZNIE")
+        st.subheader("Konfekcja (Rozkrój) - RĘCZNIE")
         s_jumbo = int(st.session_state.polprodukty.at[0, "Stan"])
         jumbo_w_koszyku = sum(item["ile_rolek"] for item in st.session_state.konf_koszyk)
         jumbo_dostepne = s_jumbo - jumbo_w_koszyku
@@ -975,7 +775,6 @@ elif menu == "Moduł Production":
             st.warning("Wszystkie dostępne rolki Jumbo zostały już przydzielone do poniższego zlecenia.")
         else:
             st.write("**Zdefiniuj szablon cięcia dla POJEDYNCZEJ rolki:** (Max 6 rolek)")
-            
             df_nieoklejone = st.session_state.produkty[st.session_state.produkty['Wariant'].str.contains("Nieoklejona")]
             
             rozkroj_temp = {}
@@ -1011,7 +810,7 @@ elif menu == "Moduł Production":
                             })
                             st.rerun()
             elif laczna_ilosc_rolek > 6:
-                st.error(f"Błąd techniczny: Szablon zawiera {laczna_ilosc_rolek} rolek. Maksymalna techniczna wydajność to 6 noży.")
+                st.error(f"Błąd techniczny: Szablon zawiera {laczna_ilosc_rolek} rolek. Maksymalna wydajność to 6 noży.")
             elif zuzyte_cm > 115:
                 st.error(f"Przekroczyłeś wymiar rolki bazowej o {zuzyte_cm - 115} cm!")
             elif zuzyte_cm > 0:
@@ -1034,7 +833,7 @@ elif menu == "Moduł Production":
                     st.session_state.konf_koszyk = []
                     st.rerun()
             with col_b2:
-                if st.button("Zatwierdź zlecenie i pobierz Specyfikację", type="primary", use_container_width=True):
+                if st.button("Zatwierdź zlecenie (aktualizacja stanów)", type="primary", use_container_width=True):
                     data_dzis_str = datetime.now().strftime("%Y/%m/%d")
                     nr_knf_auto = f"PR-KNF/{data_dzis_str}/{st.session_state.konf_counter:03d}"
                     total_jumbo_to_cut = sum(item["ile_rolek"] for item in st.session_state.konf_koszyk)
@@ -1054,19 +853,14 @@ elif menu == "Moduł Production":
                         st.session_state.produkty.at[idx, "Stan"] += total_qty
                         dodaj_ruch("PW (Gotowe)", nr_knf_auto, nazwa_gotowego, total_qty, "Konfekcja")
 
-                    b_pdf_knf = create_pdf_konfekcja(nr_knf_auto, total_jumbo_to_cut, st.session_state.konf_koszyk, total_produced, st.session_state.aktualny_uzytkownik)
-                    
-                    st.session_state.archiwum_konf_pdf.append({"id": nr_knf_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "jumbo_szt": total_jumbo_to_cut, "pdf": b_pdf_knf})
-                    st.session_state.do_pobrania.append({"nazwa": f"{nr_knf_auto.replace('/', '_')}.pdf", "data": b_pdf_knf})
-                    
+                    st.session_state.log_konf.append({"id": nr_knf_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "jumbo_szt": total_jumbo_to_cut})
                     st.session_state.konf_counter += 1
                     st.session_state.konf_koszyk = []
-                    st.session_state.wygenerowane_raporty_prod = [{"nazwa": f"{nr_knf_auto.replace('/', '_')}.pdf", "pdf": b_pdf_knf}]
-                    st.session_state.powiadomienie_sukces = "Zlecenie konfekcji wygenerowane i pobrane."
+                    st.success("Konfekcja zaksięgowana z sukcesem.")
                     st.rerun()
 
     with tab3:
-        st.subheader("Oklejanie (Tworzenie wariantu 'Oklejona') - RĘCZNIE")
+        st.subheader("Oklejanie - RĘCZNIE")
         st.write("Wybierz rolki Nieoklejone z magazynu i zewidencjuj proces nałożenia okleiny.")
         
         df_nieokl_dostepne = st.session_state.produkty[(st.session_state.produkty['Wariant'].str.contains("Nieoklejona")) & (st.session_state.produkty['Stan'] > 0)]
@@ -1088,7 +882,7 @@ elif menu == "Moduł Production":
                 ile_okleic = c_okl2.number_input("Ilość do oklejenia:", min_value=1, max_value=max_dost, value=1, step=1)
                 
                 st.divider()
-                if st.form_submit_button("Zaksięguj Oklejanie i Pobierz Kartę"):
+                if st.form_submit_button("Zaksięguj Oklejanie"):
                     data_dzis_str = datetime.now().strftime("%Y/%m/%d")
                     nr_okl_auto = f"PR-OKL/{data_dzis_str}/{st.session_state.okl_counter:03d}"
                     
@@ -1104,15 +898,9 @@ elif menu == "Moduł Production":
                     dodaj_ruch("RW", nr_okl_auto, war_nie, ile_okleic, "Stacja Oklejania")
                     dodaj_ruch("PW (Gotowe)", nr_okl_auto, war_okl, ile_okleic, "Stacja Oklejania")
                     
-                    op_list = [{"z": war_nie, "do": war_okl.split(" - ")[0], "ilosc": ile_okleic}]
-                    b_pdf_okl = create_pdf_oklejanie(nr_okl_auto, op_list, st.session_state.aktualny_uzytkownik)
-                    
-                    st.session_state.archiwum_okl_pdf.append({"id": nr_okl_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "opis": f"Oklejono {ile_okleic} szt. ({szerokosc_wybrana}cm)", "pdf": b_pdf_okl})
-                    st.session_state.do_pobrania.append({"nazwa": f"{nr_okl_auto.replace('/', '_')}.pdf", "data": b_pdf_okl})
-                    
+                    st.session_state.log_okl.append({"id": nr_okl_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "opis": f"Oklejono {ile_okleic} szt. ({szerokosc_wybrana}cm)"})
                     st.session_state.okl_counter += 1
-                    st.session_state.wygenerowane_raporty_prod = [{"nazwa": f"{nr_okl_auto.replace('/', '_')}.pdf", "pdf": b_pdf_okl}]
-                    st.session_state.powiadomienie_sukces = "Proces oklejania zaksięgowany. Pobieranie raportu..."
+                    st.success("Oklejanie zaksięgowane z sukcesem.")
                     st.rerun()
 
 elif menu == "Baza Kontrahentów (CRM)":
@@ -1202,13 +990,18 @@ elif menu == "Wydanie Towaru (WZ)":
     if "wz_koszyk" not in st.session_state:
         st.session_state.wz_koszyk = []
     
-    if "wygenerowane_raporty_wz" in st.session_state and st.session_state.wygenerowane_raporty_wz:
-        st.success("Wydanie Zewnętrzne zatwierdzone. Pobierz dokument:")
-        col1, col2 = st.columns([3, 1])
-        doc = st.session_state.wygenerowane_raporty_wz[0]
-        col1.download_button(label=f"📄 Pobierz {doc['nazwa']}", data=doc['pdf'], file_name=doc['nazwa'], mime="application/pdf", use_container_width=True)
-        if col2.button("Zamknij panel", use_container_width=True):
-            del st.session_state.wygenerowane_raporty_wz
+    if "wz_pdf_do_pobrania" in st.session_state:
+        st.success("Zatwierdzono wydanie. Pobierz dokument WZ poniżej:")
+        st.download_button(
+            label="📥 Pobierz Dokument WZ (PDF)",
+            data=st.session_state.wz_pdf_do_pobrania["data"],
+            file_name=st.session_state.wz_pdf_do_pobrania["nazwa"],
+            mime="application/pdf",
+            type="primary",
+            use_container_width=True
+        )
+        if st.button("Zamknij powiadomienie", use_container_width=True):
+            del st.session_state.wz_pdf_do_pobrania
             st.rerun()
         st.divider()
         
@@ -1310,7 +1103,7 @@ elif menu == "Wydanie Towaru (WZ)":
                         st.session_state.powiazane_zk = None
                         st.rerun()
                 with col_btn2:
-                    if st.button("Zatwierdź wydanie i generuj automatycznie PDF", type="primary", use_container_width=True):
+                    if st.button("Zatwierdź wydanie i generuj PDF", type="primary", use_container_width=True):
                         bledy = False
                         for item in st.session_state.wz_koszyk:
                             stan_mag = st.session_state.produkty[st.session_state.produkty["Wariant"] == item["Wariant"]]["Stan"].values[0]
@@ -1424,8 +1217,7 @@ elif menu == "Wydanie Towaru (WZ)":
                             pdf_bytes = bytes(pdf.output())
                             st.session_state.archiwum_wz_pdf.append({"id": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "kontrahent": wybrany_klient, "zamowienie": powiazanie_info, "pdf": pdf_bytes})
                             
-                            st.session_state.do_pobrania.append({"nazwa": f"{nr_wz_auto.replace('/', '_')}.pdf", "data": pdf_bytes})
-                            st.session_state.powiadomienie_sukces = "Wydanie Zewnętrzne zatwierdzone. Pobieranie pliku WZ..."
+                            st.session_state.wz_pdf_do_pobrania = {"nazwa": f"{nr_wz_auto.replace('/', '_')}.pdf", "data": pdf_bytes}
                             st.session_state.wz_koszyk = []
                             st.rerun()
 
@@ -1473,64 +1265,25 @@ elif menu == "Archiwum Dokumentów":
             )
 
     with tab_arch_jmb:
-        st.subheader("Rejestr Procesów Wytłaczania (Krok 1)")
-        if not st.session_state.archiwum_jumbo_pdf:
-            st.info("Brak zarejestrowanych raportów z wytłaczarki Jumbo.")
+        st.subheader("Ewidencja Procesów Wytłaczania (Krok 1)")
+        if not st.session_state.log_jumbo:
+            st.info("Brak zarejestrowanych procesów.")
         else:
-            df_jmb = pd.DataFrame(st.session_state.archiwum_jumbo_pdf)[["id", "data", "ilosc"]]
-            st.dataframe(df_jmb, use_container_width=True, hide_index=True, column_config={"id":"Numer zlecenia", "data":"Data produkcji", "ilosc":"Ilość rolek Jumbo"})
-            
-            lista_jmb_id = [item["id"] for item in st.session_state.archiwum_jumbo_pdf]
-            wybrane_jmb_id = st.selectbox("Wybierz numer raportu Jumbo do pobrania PDF", lista_jmb_id, key="sel_jmb")
-            
-            jmb_data_bytes = next(item["pdf"] for item in st.session_state.archiwum_jumbo_pdf if item["id"] == wybrane_jmb_id)
-            st.download_button(
-                label=f"Pobierz Kartę Procesu {wybrane_jmb_id} (.pdf)",
-                data=jmb_data_bytes,
-                file_name=f"{wybrane_jmb_id.replace('/', '_')}.pdf",
-                mime="application/pdf",
-                key="btn_dl_jmb"
-            )
+            st.dataframe(pd.DataFrame(st.session_state.log_jumbo), use_container_width=True, hide_index=True)
 
     with tab_arch_knf:
-        st.subheader("Rejestr Procesów Konfekcjonowania i Rozkroju (Krok 2)")
-        if not st.session_state.archiwum_konf_pdf:
-            st.info("Brak zarejestrowanych raportów ze stanowiska rozkroju.")
+        st.subheader("Ewidencja Procesów Konfekcjonowania (Krok 2)")
+        if not st.session_state.log_konf:
+            st.info("Brak zarejestrowanych procesów.")
         else:
-            df_knf = pd.DataFrame(st.session_state.archiwum_konf_pdf)[["id", "data", "jumbo_szt"]]
-            st.dataframe(df_knf, use_container_width=True, hide_index=True, column_config={"id":"Numer zlecenia rozkroju", "data":"Data operacji", "jumbo_szt":"Zużyte roleki Jumbo (szt.)"})
-            
-            lista_knf_id = [item["id"] for item in st.session_state.archiwum_konf_pdf]
-            wybrane_knf_id = st.selectbox("Wybierz numer raportu konfekcji do pobrania PDF", lista_knf_id, key="sel_knf")
-            
-            knf_data_bytes = next(item["pdf"] for item in st.session_state.archiwum_konf_pdf if item["id"] == wybrane_knf_id)
-            st.download_button(
-                label=f"Pobierz Specyfikację Rozkroju {wybrane_knf_id} (.pdf)",
-                data=knf_data_bytes,
-                file_name=f"{wybrane_knf_id.replace('/', '_')}.pdf",
-                mime="application/pdf",
-                key="btn_dl_knf"
-            )
+            st.dataframe(pd.DataFrame(st.session_state.log_konf), use_container_width=True, hide_index=True)
             
     with tab_arch_okl:
-        st.subheader("Rejestr Procesów Oklejania (Krok 3)")
-        if not st.session_state.archiwum_okl_pdf:
-            st.info("Brak zarejestrowanych raportów ze stacji oklejania.")
+        st.subheader("Ewidencja Procesów Oklejania (Krok 3)")
+        if not st.session_state.log_okl:
+            st.info("Brak zarejestrowanych procesów.")
         else:
-            df_okl = pd.DataFrame(st.session_state.archiwum_okl_pdf)[["id", "data", "opis"]]
-            st.dataframe(df_okl, use_container_width=True, hide_index=True, column_config={"id":"Numer raportu", "data":"Data operacji", "opis":"Podsumowanie partii"})
-            
-            lista_okl_id = [item["id"] for item in st.session_state.archiwum_okl_pdf]
-            wybrane_okl_id = st.selectbox("Wybierz numer raportu oklejania do pobrania PDF", lista_okl_id, key="sel_okl")
-            
-            okl_data_bytes = next(item["pdf"] for item in st.session_state.archiwum_okl_pdf if item["id"] == wybrane_okl_id)
-            st.download_button(
-                label=f"Pobierz Kartę Oklejania {wybrane_okl_id} (.pdf)",
-                data=okl_data_bytes,
-                file_name=f"{wybrane_okl_id.replace('/', '_')}.pdf",
-                mime="application/pdf",
-                key="btn_dl_okl"
-            )
+            st.dataframe(pd.DataFrame(st.session_state.log_okl), use_container_width=True, hide_index=True)
 
 elif menu == "Panel Administracyjny":
     st.header("Narzędzia Administracyjne")
