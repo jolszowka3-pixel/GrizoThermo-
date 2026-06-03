@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V49 - ZAAWANSOWANE UPRAWNIENIA)
+# 1. INICJALIZACJA BAZY (WERSJA V48)
 # ==========================================
-if 'init_v49' not in st.session_state:
-    st.session_state.init_v49 = True
+if 'init_v48' not in st.session_state:
+    st.session_state.init_v48 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -51,11 +51,7 @@ if 'init_v49' not in st.session_state:
         "admin": {
             "haslo": "admin123", 
             "imie": "Kierownik Magazynu",
-            "uprawnienia": {
-                "pulpit": True, "magazyn": True, "zk": True, 
-                "produkcja": True, "pz": True, "wz": True, 
-                "crm": True, "archiwum": True, "admin": True
-            }
+            "uprawnienia": {"produkcja": True, "pz": True, "wz": True, "admin": True}
         }
     }
     
@@ -166,24 +162,15 @@ if st.sidebar.button("Wyloguj", use_container_width=True):
     st.rerun()
 
 st.sidebar.divider()
-
-# Generowanie opcji menu na podstawie uprawnień
-opcje = []
-upr = st.session_state.aktualne_uprawnienia
-
-if upr.get("pulpit", False): opcje.append("Pulpit Główny")
-if upr.get("magazyn", False): opcje.append("Stan Magazynu")
-if upr.get("zk", False): opcje.append("Zamówienia (ZK)")
-if upr.get("produkcja", False): opcje.append("Moduł Production")
-if upr.get("pz", False): opcje.append("Przyjęcie Towaru (PZ)")
-if upr.get("wz", False): opcje.append("Wydanie Towaru (WZ)")
-if upr.get("crm", False): opcje.append("Baza Kontrahentów (CRM)")
-if upr.get("archiwum", False): opcje.append("Archiwum Dokumentów")
-if upr.get("admin", False): opcje.append("Panel Administracyjny")
-
-if not opcje:
-    st.error("Brak przypisanych modułów. Skontaktuj się z administratorem systemu.")
-    st.stop()
+opcje = ["Pulpit Główny", "Stan Magazynu"]
+if st.session_state.aktualne_uprawnienia.get("wz"): opcje.append("Zamówienia (ZK)")
+if st.session_state.aktualne_uprawnienia.get("produkcja"): opcje.append("Moduł Production")
+if st.session_state.aktualne_uprawnienia.get("pz"): opcje.append("Przyjęcie Towaru (PZ)")
+if st.session_state.aktualne_uprawnienia.get("wz"): opcje.append("Wydanie Towaru (WZ)")
+if st.session_state.aktualne_uprawnienia.get("pz") or st.session_state.aktualne_uprawnienia.get("wz"):
+    opcje.append("Baza Kontrahentów (CRM)")
+    opcje.append("Archiwum Dokumentów")
+if st.session_state.aktualne_uprawnienia.get("admin"): opcje.append("Panel Administracyjny")
 
 menu = st.sidebar.radio("Wybierz moduł:", opcje)
 
@@ -198,7 +185,7 @@ if menu == "Pulpit Główny":
     stan_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
     oczekujace_zk = len([z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"])
 
-    # KAFELKI KPI
+    # 1. KAFELKI KPI (NOWY WYGLĄD)
     col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
     with col_kpi1:
         st.markdown(f"""
@@ -235,7 +222,7 @@ if menu == "Pulpit Główny":
     st.write("")
     st.write("")
     
-    # ALERTY SUROWCOWE
+    # 2. ALERTY SUROWCOWE
     braki_surowcowe = []
     for _, row_k in st.session_state.komponenty.iterrows():
         prog_alarmowy = st.session_state.receptura_baza.get(row_k['ID'], 0) * 20
@@ -252,7 +239,7 @@ if menu == "Pulpit Główny":
 
     st.write("---")
 
-    # WYKRESY I HISTORIA
+    # 3. WYKRESY I HISTORIA
     col_dash1, col_dash2 = st.columns([1, 1])
     
     with col_dash1:
@@ -557,7 +544,7 @@ elif menu == "Moduł Production":
             "gotowe_do_auto": gotowe_do_auto
         }
 
-    # Powiadomienia operacyjne
+    # Powiadomienia operacyjne - ODPORNE NA BLOKADY
     if "plan_hali_do_pobrania" in st.session_state:
         st.success("Wygenerowano kompleksowy plan produkcji dla hali.")
         st.download_button(
@@ -1348,34 +1335,21 @@ elif menu == "Panel Administracyjny":
     with tab_uzytkownicy:
         st.write("Wprowadź dane, aby wygenerować profil pracownika.")
         with st.form("dodaj_uzytkownika"):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                login = st.text_input("Login")
-                imie = st.text_input("Imię i Nazwisko")
-                haslo = st.text_input("Hasło startowe", type="password")
-            with c2:
-                st.write("**Moduły operacyjne:**")
-                u_pulpit = st.checkbox("Pulpit Główny", value=True)
-                u_mag = st.checkbox("Stan Magazynu", value=True)
-                u_zk = st.checkbox("Zamówienia (ZK)")
-                u_prod = st.checkbox("Moduł Production")
-                u_pz = st.checkbox("Przyjęcie Towaru (PZ)")
-            with c3:
-                st.write("**Moduły zarządcze:**")
-                u_wz = st.checkbox("Wydanie Towaru (WZ)")
-                u_crm = st.checkbox("Baza Kontrahentów (CRM)")
-                u_arch = st.checkbox("Archiwum Dokumentów")
-                u_admin = st.checkbox("Panel Administracyjny")
+            c1, c2 = st.columns(2)
+            login = c1.text_input("Login")
+            imie = c1.text_input("Imię i Nazwisko")
+            haslo = c1.text_input("Hasło startowe", type="password")
+            
+            u_prod = c2.checkbox("Moduł Produkcji")
+            u_pz = c2.checkbox("Przyjęcia PZ")
+            u_wz = c2.checkbox("Wydania WZ oraz CRM")
+            u_admin = c2.checkbox("Panel Administracyjny")
             
             if st.form_submit_button("Utwórz konto"):
                 if login and haslo and imie:
                     st.session_state.uzytkownicy[login.strip()] = {
                         "haslo": haslo, "imie": imie,
-                        "uprawnienia": {
-                            "pulpit": u_pulpit, "magazyn": u_mag, "zk": u_zk, 
-                            "produkcja": u_prod, "pz": u_pz, "wz": u_wz, 
-                            "crm": u_crm, "archiwum": u_arch, "admin": u_admin
-                        }
+                        "uprawnienia": {"produkcja": u_prod, "pz": u_pz, "wz": u_wz, "admin": u_admin}
                     }
                     st.success("Konto zostało pomyślnie utworzone.")
                     st.rerun()
