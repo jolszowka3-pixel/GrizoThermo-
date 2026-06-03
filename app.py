@@ -39,10 +39,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V41 - AUTO-DOWNLOAD)
+# 1. INICJALIZACJA BAZY (WERSJA V42 - FIX FONT)
 # ==========================================
-if 'init_v41' not in st.session_state:
-    st.session_state.init_v41 = True
+if 'init_v42' not in st.session_state:
+    st.session_state.init_v42 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -117,7 +117,7 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-# CSS
+# CSS Corporate Style
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
@@ -138,8 +138,8 @@ if "do_pobrania" in st.session_state and st.session_state.do_pobrania:
     for plik in st.session_state.do_pobrania:
         b64 = base64.b64encode(plik["data"]).decode()
         html = f'''
-        <a id="auto_dl" href="data:application/pdf;base64,{b64}" download="{plik['nazwa']}"></a>
-        <script>document.getElementById('auto_dl').click();</script>
+        <a id="auto_dl_{plik['nazwa']}" href="data:application/pdf;base64,{b64}" download="{plik['nazwa']}"></a>
+        <script>document.getElementById('auto_dl_{plik['nazwa']}').click();</script>
         '''
         components.html(html, height=0)
     st.session_state.do_pobrania = []
@@ -278,7 +278,7 @@ elif menu == "Stan Magazynu":
             st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {row["Stan"]:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
 # ==========================================
-# MODUŁ ZAMÓWIENIA (ZK) 
+# MODUŁ ZAMÓWIENIA (ZK)
 # ==========================================
 elif menu == "Zamówienia (ZK)":
     st.header("Zamówienia Klientów (ZK)")
@@ -389,9 +389,6 @@ elif menu == "Zamówienia (ZK)":
 elif menu == "Moduł Production":
     st.header("Zarządzanie Produkcją i Planowanie")
     
-    # ----------------------------------------------------
-    # GŁÓWNY SILNIK KALKULACYJNY MRP
-    # ----------------------------------------------------
     oczekujace = [z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"]
     mrp_data = None
     
@@ -509,7 +506,6 @@ elif menu == "Moduł Production":
 
     tab_plan, tab_wydruk, tab1, tab2, tab3 = st.tabs(["Panel MRP (Analiza)", "Wydruk Planu dla Hali", "Krok 1: Wytłaczanie", "Krok 2: Rozkrój", "Krok 3: Oklejanie"])
     
-    # --- ZAKŁADKA 0: PANEL MRP ---
     with tab_plan:
         st.subheader("Inteligentna Analiza Zapotrzebowania (MRP)")
         
@@ -648,12 +644,11 @@ elif menu == "Moduł Production":
                             st.session_state.do_pobrania.append({"nazwa": f"{nr_okl_auto.replace('/', '_')}.pdf", "data": bytes(pdf_okl.output())})
                             st.session_state.okl_counter += 1
 
-                        st.session_state.powiadomienie_sukces = "Cały łańcuch produkcyjny zrealizowany automatycznie! Pobieranie dokumentów PDF w toku."
+                        st.session_state.powiadomienie_sukces = "Cały łańcuch produkcyjny zrealizowany automatycznie! Pobieranie dokumentów PDF..."
                         st.rerun()
                 else:
                     st.button("Zleć i Zrealizuj Automatycznie", disabled=True, use_container_width=True)
 
-    # --- ZAKŁADKA 0.5: WYDRUK DLA HALI ---
     with tab_wydruk:
         st.subheader("Kompleksowy Plan dla Hali Produkcyjnej")
         st.write("Wygeneruj jeden wspólny, czytelny dokument PDF dla operatorów maszyn, zawierający wytyczne dla całego procesu na dany dzień.")
@@ -676,7 +671,6 @@ elif menu == "Moduł Production":
                 pdf.cell(0, 6, f"Dokument wygenerowany: {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  Wydział Produkcji", border=0, ln=1, align='C')
                 pdf.ln(8)
                 
-                # SEKCJA 1
                 pdf.set_font("Roboto", "B", 12)
                 pdf.cell(0, 8, "KROK 1: WYTŁACZARKA GŁÓWNA (PRODUKCJA JUMBO)", border="B", ln=1)
                 pdf.set_font("Roboto", "", 10)
@@ -692,7 +686,6 @@ elif menu == "Moduł Production":
                     pdf.cell(0, 8, "Brak zaleceń. Wykorzystać zapas Jumbo z magazynu.", ln=1)
                 pdf.ln(5)
                 
-                # SEKCJA 2
                 pdf.set_font("Roboto", "B", 12)
                 pdf.cell(0, 8, "KROK 2: STACJA ROZKROJU (KONFEKCJA WZDŁUŻNA)", border="B", ln=1)
                 if mrp_data["potrzeba_jmb"] > 0:
@@ -714,7 +707,6 @@ elif menu == "Moduł Production":
                     pdf.cell(0, 8, "Brak zaleceń dla cięcia.", ln=1)
                 pdf.ln(5)
                 
-                # SEKCJA 3
                 pdf.set_font("Roboto", "B", 12)
                 pdf.cell(0, 8, "KROK 3: STACJA OKLEJANIA", border="B", ln=1)
                 if mrp_data["braki_okl"]:
@@ -738,7 +730,6 @@ elif menu == "Moduł Production":
                 st.session_state.powiadomienie_sukces = "Wygenerowano raport Planu. Pobieranie rozpoczęte."
                 st.rerun()
 
-    # --- KROK 1 (RĘCZNY) ---
     with tab1:
         st.subheader("Wytłaczanie Rolek Jumbo (115cm x 13mb) - RĘCZNIE")
         s_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
@@ -829,7 +820,6 @@ elif menu == "Moduł Production":
         else:
             st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
 
-    # --- KROK 2 (RĘCZNY) ---
     with tab2:
         st.subheader("Konfekcja (Tworzenie Zlecenia Rozkroju) - RĘCZNIE")
         s_jumbo = int(st.session_state.polprodukty.at[0, "Stan"])
@@ -994,7 +984,6 @@ elif menu == "Moduł Production":
                     st.session_state.powiadomienie_sukces = "Zlecenie konfekcji wygenerowane i pobrane."
                     st.rerun()
 
-    # --- KROK 3 (RĘCZNY) ---
     with tab3:
         st.subheader("Oklejanie (Tworzenie wariantu 'Oklejona') - RĘCZNIE")
         st.write("Wybierz rolki Nieoklejone z magazynu i zewidencjuj proces nałożenia okleiny.")
@@ -1065,414 +1054,6 @@ elif menu == "Moduł Production":
                     st.session_state.okl_counter += 1
                     st.session_state.powiadomienie_sukces = "Proces oklejania zaksięgowany. Pobieranie raportu..."
                     st.rerun()
-
-elif menu == "Baza Kontrahentów (CRM)":
-    st.header("Baza Kontrahentów")
-    st.write("Zarządzanie relacjami z klientami oraz dostawcami surowców.")
-    
-    tab_odbiorcy, tab_dostawcy, tab_dodaj = st.tabs([
-        "Klienci (Odbiorcy WZ)", 
-        "Dostawcy (Przyjęcia PZ)", 
-        "Nowy Kontrahent"
-    ])
-    
-    with tab_odbiorcy:
-        df_odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]
-        if df_odbiorcy.empty:
-            st.info("Brak zarejestrowanych klientów w bazie danych.")
-        else:
-            for _, row in df_odbiorcy.iterrows():
-                st.markdown(f'''
-                <div class="item-card">
-                    <div class="card-title">{row["Nazwa"]}</div>
-                    <div class="card-details">NIP: {row["NIP"]} | Adres siedziby: {row["Adres"]}</div>
-                </div>
-                ''', unsafe_allow_html=True)
-                
-    with tab_dostawcy:
-        df_dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]
-        if df_dostawcy.empty:
-            st.info("Brak zarejestrowanych dostawców w bazie danych.")
-        else:
-            for _, row in df_dostawcy.iterrows():
-                st.markdown(f'''
-                <div class="item-card item-card-purple">
-                    <div class="card-title">{row["Nazwa"]}</div>
-                    <div class="card-details">NIP: {row["NIP"]} | Adres dystrybucji: {row["Adres"]}</div>
-                </div>
-                ''', unsafe_allow_html=True)
-
-    with tab_dodaj:
-        st.subheader("Formularz rejestracji nowego podmiotu")
-        with st.form("nowy_kontrahent_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                nowa_nazwa = st.text_input("Pełna nazwa firmy (Wymagane)")
-                nowy_nip = st.text_input("Numer identyfikacji podatkowej (NIP)")
-            with col2:
-                nowy_typ = st.selectbox("Typ operacyjny podmiotu", ["Odbiorca", "Dostawca"])
-                nowy_adres = st.text_input("Adres rejestracyjny (Wymagane)")
-            
-            st.write("")
-            if st.form_submit_button("Zarejestruj podmiot w systemie"):
-                if nowa_nazwa.strip() and nowy_adres.strip():
-                    nowy_wpis = pd.DataFrame([{
-                        "Nazwa": nowa_nazwa.strip(),
-                        "NIP": nowy_nip.strip(),
-                        "Adres": nowy_adres.strip(),
-                        "Typ": nowy_typ
-                    }])
-                    st.session_state.kontrahenci = pd.concat([st.session_state.kontrahenci, nowy_wpis], ignore_index=True)
-                    st.success(f"Podmiot {nowa_nazwa} został pomyślnie zapisany w bazie CRM.")
-                    st.rerun()
-                else:
-                    st.error("Odrzucono. Pola Nazwa firmy oraz Adres rejestracyjny są obowiązkowe.")
-
-elif menu == "Przyjęcie Towaru (PZ)":
-    st.header("Przyjęcie Zewnętrzne (PZ)")
-    dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]["Nazwa"].tolist()
-    if not dostawcy:
-        st.error("Brak dostawców w bazie danych CRM.")
-    else:
-        with st.form("pz"):
-            n = st.text_input("Numer dokumentu (np. nr faktury zakupu)")
-            d = st.selectbox("Dostawca surowca", dostawcy)
-            k = st.selectbox("Wybierz surowiec", st.session_state.komponenty["Nazwa"].tolist())
-            i = st.number_input("Ilość przyjmowana", min_value=0.1, value=100.0)
-            if st.form_submit_button("Zatwierdź dokument PZ"):
-                idx = st.session_state.komponenty.index[st.session_state.komponenty["Nazwa"] == k][0]
-                st.session_state.komponenty.at[idx, "Stan"] += i
-                dodaj_ruch("PZ", n, k, i, d)
-                st.success("Zapisano przyjęcie zewnętrzne.")
-                st.rerun()
-
-elif menu == "Wydanie Towaru (WZ)":
-    st.header("Wydanie Zewnętrzne (WZ)")
-    odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
-    
-    if "wz_koszyk" not in st.session_state:
-        st.session_state.wz_koszyk = []
-        
-    if not odbiorcy:
-        st.warning("Brak odbiorców w bazie danych CRM.")
-    else:
-        st.subheader("1. Realizacja Zamówienia (Opcjonalne wczytanie z ZK)")
-        oczekujace_zk = [z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"]
-        if oczekujace_zk:
-            opcje_zk = {f"{z['id']} | Kontrahent: {z['klient']}": z for z in oczekujace_zk}
-            col_zk1, col_zk2 = st.columns([3, 1])
-            with col_zk1:
-                wybrane_zk_klucz = st.selectbox("Wybierz oczekujące zamówienie z listy", ["-- Wybierz (lub pomiń dla wydania ręcznego) --"] + list(opcje_zk.keys()))
-            with col_zk2:
-                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
-                if st.button("Załaduj zamówienie na WZ", use_container_width=True):
-                    if wybrane_zk_klucz != "-- Wybierz (lub pomiń dla wydania ręcznego) --":
-                        z = opcje_zk[wybrane_zk_klucz]
-                        st.session_state.wybrany_klient_wz = z["klient"]
-                        st.session_state.powiazane_zk = z["id"]
-                        st.session_state.wz_koszyk = [{"Wariant": p["Wariant"], "Ilosc": p["Ilość (szt.)"]} for p in z["pozycje"]]
-                        st.rerun()
-        else:
-            st.info("Brak oczekujących zamówień w systemie. Możesz wystawić WZ ręcznie.")
-            
-        st.divider()
-        
-        dostepne_produkty = st.session_state.produkty[st.session_state.produkty["Stan"] > 0].copy()
-        
-        if dostepne_produkty.empty and not st.session_state.wz_koszyk:
-            st.error("Brak gotowych produktów na magazynie! Wymagana konfekcja.")
-        else:
-            data_dzis_str = datetime.now().strftime("%Y/%m/%d")
-            nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
-            
-            st.subheader("2. Dane Odbiorcy i Dokumentu")
-            if st.session_state.powiazane_zk:
-                st.success(f"Aktywne powiązanie: Wydanie realizuje zamówienie {st.session_state.powiazane_zk}. Zostanie ono zamknięte po wygenerowaniu WZ.")
-            
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                idx_klienta = odbiorcy.index(st.session_state.wybrany_klient_wz) if st.session_state.wybrany_klient_wz in odbiorcy else 0
-                wybrany_klient = st.selectbox("Nabywca (Wybierz z bazy)", odbiorcy, index=idx_klienta)
-                st.session_state.wybrany_klient_wz = wybrany_klient
-            with col_f2:
-                uwagi_doc = st.text_input("Uwagi do dokumentu", value="Dostawa z magazynu głównego.")
-                
-            st.divider()
-            st.subheader("3. Dodaj produkty do wydania")
-            
-            opcje_list = []
-            opcje_map = {}
-            for _, r in dostepne_produkty.iterrows():
-                wystepuje_w_koszyku = sum(item["Ilosc"] for item in st.session_state.wz_koszyk if item["Wariant"] == r["Wariant"])
-                efektywny_stan = int(r["Stan"] - wystepuje_w_koszyku)
-                
-                if efektywny_stan > 0:
-                    label = f"{r['Wariant']} (Dostępne: {efektywny_stan} szt.)"
-                    opcje_list.append(label)
-                    opcje_map[label] = (r["Wariant"], efektywny_stan)
-            
-            if not opcje_list:
-                st.info("Brak dostępnych pozycji magazynowych do ręcznego dodania.")
-            else:
-                col_p1, col_p2, col_p3 = st.columns([3, 1, 1])
-                with col_p1:
-                    wybrana_opcja = st.selectbox("Wybierz asortyment z magazynu", opcje_list)
-                
-                prawdziwa_nazwa, max_dostepne = opcje_map[wybrana_opcja]
-                
-                with col_p2:
-                    ile_wydac = st.number_input("Ilość do wydania", min_value=1, max_value=max_dostepne, value=1, step=1)
-                    
-                with col_p3:
-                    st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
-                    if st.button("Dodaj do dokumentu", use_container_width=True):
-                        istnieje = False
-                        for item in st.session_state.wz_koszyk:
-                            if item["Wariant"] == prawdziwa_nazwa:
-                                item["Ilosc"] += ile_wydac
-                                istnieje = True
-                                break
-                        if not istnieje:
-                            st.session_state.wz_koszyk.append({"Wariant": prawdziwa_nazwa, "Ilosc": ile_wydac})
-                        st.rerun()
-
-            if st.session_state.wz_koszyk:
-                st.divider()
-                st.subheader("4. Podsumowanie dokumentu WZ")
-                
-                df_koszyk = pd.DataFrame(st.session_state.wz_koszyk)
-                df_koszyk.columns = ["Nazwa asortymentu", "Ilość do wydania (szt.)"]
-                st.dataframe(df_koszyk, use_container_width=True, hide_index=True)
-                
-                col_btn1, col_btn2 = st.columns(2)
-                with col_btn1:
-                    if st.button("Wyczyść formularz", use_container_width=True):
-                        st.session_state.wz_koszyk = []
-                        st.session_state.powiazane_zk = None
-                        st.rerun()
-                with col_btn2:
-                    if st.button("Zatwierdź wydanie i generuj automatycznie PDF", type="primary", use_container_width=True):
-                        bledy = False
-                        for item in st.session_state.wz_koszyk:
-                            stan_mag = st.session_state.produkty[st.session_state.produkty["Wariant"] == item["Wariant"]]["Stan"].values[0]
-                            if item["Ilosc"] > stan_mag:
-                                st.error(f"Braki magazynowe uniemożliwiają wydanie dla: {item['Wariant']}. Potrzeba {item['Ilosc']} szt., dostępnych: {int(stan_mag)} szt.")
-                                bledy = True
-                                
-                        if not bledy:
-                            dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
-                            klient_adres = dane_klienta["Adres"]
-                            klient_nip = dane_klienta["NIP"]
-                            
-                            font_path, font_bold_path = pobierz_czcionki()
-                            pdf = FPDF()
-                            pdf.add_page()
-                            pdf.add_font("Roboto", "", font_path)
-                            pdf.add_font("Roboto", "B", font_bold_path)
-                            
-                            pdf.set_fill_color(240, 240, 240)
-                            pdf.set_font("Roboto", "B", 15)
-                            pdf.cell(0, 12, f"WYDANIE ZEWNĘTRZNE (WZ) NR {nr_wz_auto}", border=0, ln=1, align='C', fill=True)
-                            
-                            # Adnotacja o zamówieniu klienta na PDF
-                            if st.session_state.powiazane_zk:
-                                pdf.set_font("Roboto", "I", 11)
-                                pdf.cell(0, 8, f"Dotyczy zamówienia nr: {st.session_state.powiazane_zk}", border=0, ln=1, align='C')
-                            
-                            pdf.set_font("Roboto", "", 9)
-                            pdf.set_text_color(100, 100, 100)
-                            pdf.cell(0, 6, f"Data wydania: {datetime.now().strftime('%Y-%m-%d')}   |   Miejsce wystawienia: {MOJA_FIRMA['miejscowosc_wystawienia']}", border=0, ln=1, align='R')
-                            pdf.set_text_color(0, 0, 0) 
-                            pdf.ln(8)
-                            
-                            y_start = pdf.get_y()
-                            pdf.set_fill_color(248, 248, 248)
-                            pdf.set_font("Roboto", "B", 10)
-                            pdf.cell(90, 7, "  SPRZEDAWCA / WYSTAWCA", border=0, ln=1, fill=True)
-                            pdf.set_font("Roboto", "", 9)
-                            pdf.multi_cell(90, 5, f"{MOJA_FIRMA['nazwa']}\n{MOJA_FIRMA['adres']}\n{MOJA_FIRMA['nip']}\n{MOJA_FIRMA['kontakt']}", border=0)
-                            y_left = pdf.get_y()
-                            
-                            pdf.set_xy(105, y_start)
-                            pdf.set_font("Roboto", "B", 10)
-                            pdf.cell(90, 7, "  NABYWCA / ODBIORCA", border=0, ln=1, fill=True)
-                            pdf.set_xy(105, y_start + 7)
-                            pdf.set_font("Roboto", "", 9)
-                            nip_czysty = f"NIP: {klient_nip}" if pd.notna(klient_nip) and str(klient_nip).strip() else ""
-                            pdf.multi_cell(90, 5, f"{wybrany_klient}\n{klient_adres}\n{nip_czysty}", border=0)
-                            y_right = pdf.get_y()
-                            
-                            pdf.set_y(max(y_left, y_right) + 12)
-                            pdf.set_font("Roboto", "B", 10)
-                            pdf.cell(0, 8, "POZYCJE DOKUMENTU", border="B", ln=1)
-                            pdf.ln(3)
-                            
-                            pdf.set_fill_color(230, 235, 245)
-                            pdf.set_font("Roboto", "B", 9)
-                            pdf.cell(15, 8, "Lp.", border=1, align='C', fill=True)
-                            pdf.cell(115, 8, "Nazwa asortymentu", border=1, align='L', fill=True)
-                            pdf.cell(30, 8, "Ilość", border=1, align='C', fill=True)
-                            pdf.cell(30, 8, "Jm.", border=1, align='C', ln=1, fill=True)
-                            
-                            pdf.set_font("Roboto", "", 9)
-                            
-                            lp = 1
-                            for pozycja in st.session_state.wz_koszyk:
-                                nazwa_w = pozycja["Wariant"]
-                                ile_w = pozycja["Ilosc"]
-                                
-                                pdf.cell(15, 8, str(lp), border=1, align='C')
-                                pdf.cell(115, 8, nazwa_w, border=1, align='L')
-                                pdf.cell(30, 8, str(ile_w), border=1, align='C')
-                                pdf.cell(30, 8, "szt.", border=1, align='C', ln=1)
-                                
-                                idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
-                                st.session_state.produkty.at[idx, "Stan"] -= ile_w
-                                
-                                dodaj_ruch("WZ", nr_wz_auto, nazwa_w, ile_w, wybrany_klient)
-                                lp += 1
-                            
-                            st.session_state.wz_counter += 1
-                            
-                            powiazanie_info = st.session_state.powiazane_zk if st.session_state.powiazane_zk else "-"
-                            
-                            if st.session_state.powiazane_zk:
-                                for zmw in st.session_state.zamowienia:
-                                    if zmw["id"] == st.session_state.powiazane_zk:
-                                        zmw["Status"] = "Zrealizowane"
-                                        break
-                                st.session_state.powiazane_zk = None
-                            
-                            pdf.ln(10)
-                            if uwagi_doc.strip():
-                                pdf.set_font("Roboto", "B", 9)
-                                pdf.cell(15, 5, "Uwagi:", border=0)
-                                pdf.set_font("Roboto", "", 9)
-                                pdf.multi_cell(0, 5, uwagi_doc.strip(), border=0)
-                            
-                            pdf.ln(25)
-                            y_sig = pdf.get_y()
-                            pdf.set_font("Roboto", "", 8.5)
-                            pdf.set_xy(15, y_sig)
-                            pdf.cell(60, 5, "..........................................................", align='C', ln=1)
-                            pdf.set_x(15)
-                            pdf.cell(60, 5, f"Wystawił: {st.session_state.aktualny_uzytkownik}", align='C')
-                            
-                            pdf.set_xy(135, y_sig)
-                            pdf.cell(60, 5, "..........................................................", align='C', ln=1)
-                            pdf.set_x(135)
-                            pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
-                            
-                            pdf_bytes = bytes(pdf.output())
-                            st.session_state.archiwum_wz_pdf.append({"id": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "kontrahent": wybrany_klient, "zamowienie": powiazanie_info, "pdf": pdf_bytes})
-                            
-                            st.session_state.do_pobrania.append({"nazwa": f"{nr_wz_auto.replace('/', '_')}.pdf", "data": pdf_bytes})
-                            st.session_state.powiadomienie_sukces = "Wydanie Zewnętrzne zatwierdzone. Pobieranie pliku WZ..."
-                            st.session_state.wz_koszyk = []
-                            st.rerun()
-
-elif menu == "Archiwum Dokumentów":
-    st.header("Archiwum Dokumentów Operacyjnych i Technologicznych")
-    
-    tab_arch_wz, tab_arch_pz, tab_arch_jmb, tab_arch_knf, tab_arch_okl = st.tabs([
-        "Wydania (WZ)", 
-        "Przyjęcia (PZ)", 
-        "Wytłaczanie JUMBO", 
-        "Konfekcja (Rozkrój)",
-        "Oklejanie"
-    ])
-    
-    with tab_arch_wz:
-        st.subheader("Rejestr Dokumentów WZ")
-        if not st.session_state.archiwum_wz_pdf:
-            st.info("Brak wystawionych dokumentów WZ w bazie danych.")
-        else:
-            df_wz = pd.DataFrame(st.session_state.archiwum_wz_pdf)[["id", "data", "kontrahent", "zamowienie"]]
-            st.dataframe(df_wz, use_container_width=True, hide_index=True, column_config={"id":"Numer dokumentu", "data":"Data wystawienia", "kontrahent":"Odbiorca", "zamowienie": "Dotyczy ZK"})
-            
-            lista_wz_id = [item["id"] for item in st.session_state.archiwum_wz_pdf]
-            wybrane_wz_id = st.selectbox("Wybierz numer WZ do pobrania pliku PDF", lista_wz_id, key="sel_wz")
-            
-            wz_data_bytes = next(item["pdf"] for item in st.session_state.archiwum_wz_pdf if item["id"] == wybrane_wz_id)
-            st.download_button(
-                label=f"Pobierz dokument {wybrane_wz_id} (.pdf)",
-                data=wz_data_bytes,
-                file_name=f"{wybrane_wz_id.replace('/', '_')}.pdf",
-                mime="application/pdf",
-                key="btn_dl_wz"
-            )
-
-    with tab_arch_pz:
-        st.subheader("Rejestr Dokumentów PZ")
-        df_pz = st.session_state.historia[st.session_state.historia["Typ"] == "PZ"]
-        if df_pz.empty:
-            st.info("Brak zarejestrowanych dokumentów PZ w bazie.")
-        else:
-            st.dataframe(
-                df_pz.sort_values(by="Data", ascending=False),
-                use_container_width=True, hide_index=True,
-                column_config={"Data":"Data przyjęcia", "Dokument":"Numer PZ", "Produkt/Surowiec":"Surowiec", "Ilosc":"Ilość", "Kontrahent":"Dostawca"}
-            )
-
-    with tab_arch_jmb:
-        st.subheader("Rejestr Procesów Wytłaczania (Krok 1)")
-        if not st.session_state.archiwum_jumbo_pdf:
-            st.info("Brak zarejestrowanych raportów z wytłaczarki Jumbo.")
-        else:
-            df_jmb = pd.DataFrame(st.session_state.archiwum_jumbo_pdf)[["id", "data", "ilosc"]]
-            st.dataframe(df_jmb, use_container_width=True, hide_index=True, column_config={"id":"Numer zlecenia", "data":"Data produkcji", "ilosc":"Ilość rolek Jumbo"})
-            
-            lista_jmb_id = [item["id"] for item in st.session_state.archiwum_jumbo_pdf]
-            wybrane_jmb_id = st.selectbox("Wybierz numer raportu Jumbo do pobrania PDF", lista_jmb_id, key="sel_jmb")
-            
-            jmb_data_bytes = next(item["pdf"] for item in st.session_state.archiwum_jumbo_pdf if item["id"] == wybrane_jmb_id)
-            st.download_button(
-                label=f"Pobierz Kartę Procesu {wybrane_jmb_id} (.pdf)",
-                data=jmb_data_bytes,
-                file_name=f"{wybrane_jmb_id.replace('/', '_')}.pdf",
-                mime="application/pdf",
-                key="btn_dl_jmb"
-            )
-
-    with tab_arch_knf:
-        st.subheader("Rejestr Procesów Konfekcjonowania i Rozkroju (Krok 2)")
-        if not st.session_state.archiwum_konf_pdf:
-            st.info("Brak zarejestrowanych raportów ze stanowiska rozkroju.")
-        else:
-            df_knf = pd.DataFrame(st.session_state.archiwum_konf_pdf)[["id", "data", "jumbo_szt"]]
-            st.dataframe(df_knf, use_container_width=True, hide_index=True, column_config={"id":"Numer zlecenia rozkroju", "data":"Data operacji", "jumbo_szt":"Zużyte roleki Jumbo (szt.)"})
-            
-            lista_knf_id = [item["id"] for item in st.session_state.archiwum_konf_pdf]
-            wybrane_knf_id = st.selectbox("Wybierz numer raportu konfekcji do pobrania PDF", lista_knf_id, key="sel_knf")
-            
-            knf_data_bytes = next(item["pdf"] for item in st.session_state.archiwum_konf_pdf if item["id"] == wybrane_knf_id)
-            st.download_button(
-                label=f"Pobierz Specyfikację Rozkroju {wybrane_knf_id} (.pdf)",
-                data=knf_data_bytes,
-                file_name=f"{wybrane_knf_id.replace('/', '_')}.pdf",
-                mime="application/pdf",
-                key="btn_dl_knf"
-            )
-            
-    with tab_arch_okl:
-        st.subheader("Rejestr Procesów Oklejania (Krok 3)")
-        if not st.session_state.archiwum_okl_pdf:
-            st.info("Brak zarejestrowanych raportów ze stacji oklejania.")
-        else:
-            df_okl = pd.DataFrame(st.session_state.archiwum_okl_pdf)[["id", "data", "opis"]]
-            st.dataframe(df_okl, use_container_width=True, hide_index=True, column_config={"id":"Numer raportu", "data":"Data operacji", "opis":"Podsumowanie partii"})
-            
-            lista_okl_id = [item["id"] for item in st.session_state.archiwum_okl_pdf]
-            wybrane_okl_id = st.selectbox("Wybierz numer raportu oklejania do pobrania PDF", lista_okl_id, key="sel_okl")
-            
-            okl_data_bytes = next(item["pdf"] for item in st.session_state.archiwum_okl_pdf if item["id"] == wybrane_okl_id)
-            st.download_button(
-                label=f"Pobierz Kartę Oklejania {wybrane_okl_id} (.pdf)",
-                data=okl_data_bytes,
-                file_name=f"{wybrane_okl_id.replace('/', '_')}.pdf",
-                mime="application/pdf",
-                key="btn_dl_okl"
-            )
 
 elif menu == "Panel Administracyjny":
     st.header("Narzędzia Administracyjne")
