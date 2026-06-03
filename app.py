@@ -4,7 +4,6 @@ from datetime import datetime
 import os
 import urllib.request
 from fpdf import FPDF
-import math
 
 # Konfiguracja strony
 st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
@@ -38,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V30)
+# 1. INICJALIZACJA BAZY (WERSJA V31)
 # ==========================================
-if 'init_v30' not in st.session_state:
-    st.session_state.init_v30 = True
+if 'init_v31' not in st.session_state:
+    st.session_state.init_v31 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -101,6 +100,10 @@ if 'init_v30' not in st.session_state:
     st.session_state.wz_koszyk = []
     st.session_state.konf_koszyk = []
     st.session_state.zamowienia = []
+    
+    # Zmienne wspierające dla integracji ZK z WZ
+    st.session_state.powiazane_zk = None
+    st.session_state.wybrany_klient_wz = None
 
 def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     uzytkownik = st.session_state.aktualny_uzytkownik if st.session_state.aktualny_uzytkownik else "System"
@@ -255,7 +258,7 @@ elif menu == "Stan Magazynu":
             st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {row["Stan"]:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
 # ==========================================
-# MODUŁ ZAMÓWIENIA (ZK) - NOWY
+# MODUŁ ZAMÓWIENIA (ZK)
 # ==========================================
 elif menu == "Zamówienia (ZK)":
     st.header("Zamówienia Klientów (ZK) i Planowanie Zapotrzebowania")
@@ -326,8 +329,9 @@ elif menu == "Zamówienia (ZK)":
                 with st.expander(f"{z['id']} | {z['klient']} | Data: {z['data']} | Status: {z['Status']}"):
                     st.write(f"**Uwagi:** {z['uwagi']}")
                     st.table(pd.DataFrame(z["pozycje"]).set_index("Wariant"))
+                    # Możliwość ręcznego zamknięcia dla admina, choć WZ robi to z automatu
                     if z["Status"] == "Oczekujące":
-                        if st.button("Oznacz jako Zrealizowane (Tylko status)", key=f"btn_{z['id']}"):
+                        if st.button("Ręcznie oznacz jako zrealizowane", key=f"btn_{z['id']}"):
                             z["Status"] = "Zrealizowane"
                             st.rerun()
 
@@ -339,14 +343,12 @@ elif menu == "Zamówienia (ZK)":
         if not oczekujace:
             st.info("Brak oczekujących zamówień. Magazyn nie wymaga uzupełnień celowych.")
         else:
-            # Agregacja zapotrzebowania
             zapotrzebowanie = {}
             for z in oczekujace:
                 for p in z["pozycje"]:
                     wariant = p["Wariant"]
                     zapotrzebowanie[wariant] = zapotrzebowanie.get(wariant, 0) + p["Ilość (szt.)"]
                     
-            # Zderzenie ze stanem magazynowym
             braki = []
             for wariant, ilosc_wymagana in zapotrzebowanie.items():
                 stan_mag = st.session_state.produkty[st.session_state.produkty["Wariant"] == wariant]["Stan"].values[0]
@@ -362,12 +364,10 @@ elif menu == "Zamówienia (ZK)":
                 df_braki = pd.DataFrame(braki)
                 st.dataframe(df_braki[["Wariant", "Brak_szt"]], use_container_width=True, hide_index=True)
                 
-                # Uproszczony algorytm pakowania zerowego odpadu (115cm)
                 items_to_pack = []
                 for b in braki:
                     items_to_pack.extend([(b["Wariant"], b["Szerokosc"])] * b["Brak_szt"])
                 
-                # Sortowanie od największych szerokości
                 items_to_pack.sort(key=lambda x: x[1], reverse=True)
                 
                 plan_rolek = []
@@ -375,10 +375,8 @@ elif menu == "Zamówienia (ZK)":
                     rolka = {}
                     used_cm = 0
                     i = 0
-                    # 1. Próba upakowania potrzebnych elementów
                     while i < len(items_to_pack):
                         nazwa, szer = items_to_pack[i]
-                        # Unikamy zostawiania dokładnie 5 cm na końcu (bo najmniejsza rolka to 10cm)
                         if used_cm + szer <= 115 and (115 - (used_cm + szer) != 5):
                             rolka[nazwa] = rolka.get(nazwa, 0) + 1
                             used_cm += szer
@@ -390,7 +388,6 @@ elif menu == "Zamówienia (ZK)":
                         else:
                             i += 1
                             
-                    # 2. Dopełnianie rolki produktami standardowymi do pełnych 115cm (na magazyn)
                     rem = 115 - used_cm
                     while rem >= 10:
                         pad_w = 15 if (rem % 15 == 0 or rem >= 15) and rem != 20 else 10
@@ -407,7 +404,6 @@ elif menu == "Zamówienia (ZK)":
                 if s_jumbo_akt < len(plan_rolek):
                     st.warning(f"Posiadasz tylko {s_jumbo_akt} rolek Jumbo. Musisz najpierw wytłoczyć brakujące {len(plan_rolek) - s_jumbo_akt} szt.")
                 
-                # Zliczanie takich samych szablonów
                 zliczone_szablony = {}
                 for r in plan_rolek:
                     klucz = str(dict(sorted(r.items())))
@@ -469,7 +465,7 @@ elif menu == "Zamówienia (ZK)":
                     st.rerun()
 
 # ==========================================
-# MODUŁ 3: PRODUKCJA (DWUETAPOWA Z RAPORTAMI PDF)
+# MODUŁ 3: PRODUKCJA
 # ==========================================
 elif menu == "Moduł Production":
     st.header("Zarządzanie Produkcją")
@@ -486,7 +482,6 @@ elif menu == "Moduł Production":
         )
         st.divider()
     
-    # --- KROK 1 ---
     with tab1:
         st.subheader("Wytłaczanie Rolek Jumbo (115cm x 13mb)")
         s_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
@@ -575,7 +570,6 @@ elif menu == "Moduł Production":
         else:
             st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
 
-    # --- KROK 2 ---
     with tab2:
         st.subheader("Konfekcja (Tworzenie Zlecenia Rozkroju)")
         s_jumbo = int(st.session_state.polprodukty.at[0, "Stan"])
@@ -602,11 +596,9 @@ elif menu == "Moduł Production":
             st.write("")
             if zuzyte_cm == 115:
                 st.success("Szablon cięcia skonfigurowany prawidłowo (115 / 115 cm).")
-                
                 col_k1, col_k2 = st.columns([1, 2])
                 with col_k1:
                     ile_tym_szablonem = st.number_input("Ile rolek Jumbo chcesz pociąć tym wzorem?", min_value=1, max_value=max(1, jumbo_dostepne), value=1)
-                
                 with col_k2:
                     st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                     if st.button("Dodaj szablon do zlecenia produkcyjnego", use_container_width=True):
@@ -620,7 +612,6 @@ elif menu == "Moduł Production":
                                     typ = "Okl." if "Oklejona" in st.session_state.produkty.at[idx, 'Wariant'] else "Nieokl."
                                     parts.append(f"{qty}x {szer}cm {typ}")
                             opis_szablonu = " | ".join(parts)
-                            
                             st.session_state.konf_koszyk.append({
                                 "szablon": rozkroj_temp.copy(),
                                 "ile_rolek": ile_tym_szablonem,
@@ -632,7 +623,6 @@ elif menu == "Moduł Production":
             elif zuzyte_cm > 0:
                 st.warning(f"Suma szerokości: {zuzyte_cm} cm. Do zagospodarowania pozostało: {115 - zuzyte_cm} cm.")
 
-        # Wyświetlanie koszyka zleceń
         if st.session_state.konf_koszyk:
             st.divider()
             st.subheader("2. Podsumowanie Zlecenia Rozkroju")
@@ -742,13 +732,7 @@ elif menu == "Moduł Production":
 
 elif menu == "Baza Kontrahentów (CRM)":
     st.header("Baza Kontrahentów")
-    st.write("Zarządzanie relacjami z klientami oraz dostawcami surowców.")
-    
-    tab_odbiorcy, tab_dostawcy, tab_dodaj = st.tabs([
-        "Klienci (Odbiorcy WZ)", 
-        "Dostawcy (Przyjęcia PZ)", 
-        "Nowy Kontrahent"
-    ])
+    tab_odbiorcy, tab_dostawcy, tab_dodaj = st.tabs(["Klienci (Odbiorcy WZ)", "Dostawcy (Przyjęcia PZ)", "Nowy Kontrahent"])
     
     with tab_odbiorcy:
         df_odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]
@@ -756,12 +740,7 @@ elif menu == "Baza Kontrahentów (CRM)":
             st.info("Brak zarejestrowanych klientów w bazie danych.")
         else:
             for _, row in df_odbiorcy.iterrows():
-                st.markdown(f'''
-                <div class="item-card">
-                    <div class="card-title">{row["Nazwa"]}</div>
-                    <div class="card-details">NIP: {row["NIP"]} | Adres siedziby: {row["Adres"]}</div>
-                </div>
-                ''', unsafe_allow_html=True)
+                st.markdown(f'<div class="item-card"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">NIP: {row["NIP"]} | Adres siedziby: {row["Adres"]}</div></div>', unsafe_allow_html=True)
                 
     with tab_dostawcy:
         df_dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]
@@ -769,38 +748,24 @@ elif menu == "Baza Kontrahentów (CRM)":
             st.info("Brak zarejestrowanych dostawców w bazie danych.")
         else:
             for _, row in df_dostawcy.iterrows():
-                st.markdown(f'''
-                <div class="item-card item-card-purple">
-                    <div class="card-title">{row["Nazwa"]}</div>
-                    <div class="card-details">NIP: {row["NIP"]} | Adres dystrybucji: {row["Adres"]}</div>
-                </div>
-                ''', unsafe_allow_html=True)
+                st.markdown(f'<div class="item-card item-card-purple"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">NIP: {row["NIP"]} | Adres dystrybucji: {row["Adres"]}</div></div>', unsafe_allow_html=True)
 
     with tab_dodaj:
-        st.subheader("Formularz rejestracji nowego podmiotu")
         with st.form("nowy_kontrahent_form"):
             col1, col2 = st.columns(2)
-            with col1:
-                nowa_nazwa = st.text_input("Pełna nazwa firmy (Wymagane)")
-                nowy_nip = st.text_input("Numer identyfikacji podatkowej (NIP)")
-            with col2:
-                nowy_typ = st.selectbox("Typ operacyjny podmiotu", ["Odbiorca", "Dostawca"])
-                nowy_adres = st.text_input("Adres rejestracyjny (Wymagane)")
+            nowa_nazwa = col1.text_input("Pełna nazwa firmy (Wymagane)")
+            nowy_nip = col1.text_input("Numer identyfikacji podatkowej (NIP)")
+            nowy_typ = col2.selectbox("Typ operacyjny podmiotu", ["Odbiorca", "Dostawca"])
+            nowy_adres = col2.text_input("Adres rejestracyjny (Wymagane)")
             
-            st.write("")
-            if st.form_submit_button("Zarejestruj podmiot w systemie"):
+            if st.form_submit_button("Zarejestruj podmiot"):
                 if nowa_nazwa.strip() and nowy_adres.strip():
-                    nowy_wpis = pd.DataFrame([{
-                        "Nazwa": nowa_nazwa.strip(),
-                        "NIP": nowy_nip.strip(),
-                        "Adres": nowy_adres.strip(),
-                        "Typ": nowy_typ
-                    }])
+                    nowy_wpis = pd.DataFrame([{"Nazwa": nowa_nazwa.strip(), "NIP": nowy_nip.strip(), "Adres": nowy_adres.strip(), "Typ": nowy_typ}])
                     st.session_state.kontrahenci = pd.concat([st.session_state.kontrahenci, nowy_wpis], ignore_index=True)
-                    st.success(f"Podmiot {nowa_nazwa} został pomyślnie zapisany w bazie CRM.")
+                    st.success(f"Pomyślnie dodano: {nowa_nazwa}.")
                     st.rerun()
                 else:
-                    st.error("Odrzucono. Pola Nazwa firmy oraz Adres rejestracyjny są obowiązkowe.")
+                    st.error("Pola Nazwa firmy oraz Adres są obowiązkowe.")
 
 elif menu == "Przyjęcie Towaru (PZ)":
     st.header("Przyjęcie Zewnętrzne (PZ)")
@@ -820,9 +785,15 @@ elif menu == "Przyjęcie Towaru (PZ)":
                 st.success("Zapisano przyjęcie zewnętrzne.")
                 st.rerun()
 
+# ==========================================
+# ZMODYFIKOWANY MODUŁ WZ (Z OBSŁUGĄ ZK)
+# ==========================================
 elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
+    
+    if "wybrany_klient_wz" not in st.session_state:
+        st.session_state.wybrany_klient_wz = odbiorcy[0] if odbiorcy else None
     
     if "wygenerowane_pdf" in st.session_state:
         st.success(f"Zaksięgowano dokument: {st.session_state.nazwa_pliku_wz}")
@@ -838,18 +809,35 @@ elif menu == "Wydanie Towaru (WZ)":
     if not odbiorcy:
         st.warning("Brak odbiorców w bazie danych CRM.")
     else:
+        oczekujace_zk = [z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"]
+        if oczekujace_zk:
+            with st.expander("INICJALIZACJA Z ZAMÓWIENIA KLIENTA (Wczytaj z ZK)", expanded=False):
+                opcje_zk = {f"{z['id']} | Kontrahent: {z['klient']}": z for z in oczekujace_zk}
+                wybrane_zk_klucz = st.selectbox("Wybierz oczekujące zamówienie", list(opcje_zk.keys()))
+                if st.button("Załaduj zamówienie do przygotowania WZ", use_container_width=True):
+                    z = opcje_zk[wybrane_zk_klucz]
+                    st.session_state.wybrany_klient_wz = z["klient"]
+                    st.session_state.powiazane_zk = z["id"]
+                    st.session_state.wz_koszyk = [{"Wariant": p["Wariant"], "Ilosc": p["Ilość (szt.)"]} for p in z["pozycje"]]
+                    st.rerun()
+                    
         dostepne_produkty = st.session_state.produkty[st.session_state.produkty["Stan"] > 0].copy()
         
         if dostepne_produkty.empty and not st.session_state.wz_koszyk:
-            st.error("Brak gotowych produktów na magazynie! Wykonaj rozkrój z rolki Jumbo w module Produkcji.")
+            st.error("Brak gotowych produktów na magazynie! Wymagana konfekcja.")
         else:
             data_dzis_str = datetime.now().strftime("%Y/%m/%d")
             nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
             
             st.subheader("1. Dane Odbiorcy i Dokumentu")
+            if st.session_state.powiazane_zk:
+                st.info(f"Dokument powiązany z zamówieniem: {st.session_state.powiazane_zk}. Zostanie ono automatycznie zamknięte po wygenerowaniu dokumentu WZ.")
+            
             col_f1, col_f2 = st.columns(2)
             with col_f1:
-                wybrany_klient = st.selectbox("Nabywca (Wybierz z bazy)", odbiorcy)
+                idx_klienta = odbiorcy.index(st.session_state.wybrany_klient_wz) if st.session_state.wybrany_klient_wz in odbiorcy else 0
+                wybrany_klient = st.selectbox("Nabywca (Wybierz z bazy)", odbiorcy, index=idx_klienta)
+                st.session_state.wybrany_klient_wz = wybrany_klient
             with col_f2:
                 uwagi_doc = st.text_input("Uwagi do dokumentu", value="Dostawa z magazynu głównego.")
                 
@@ -868,7 +856,7 @@ elif menu == "Wydanie Towaru (WZ)":
                     opcje_map[label] = (r["Wariant"], efektywny_stan)
             
             if not opcje_list:
-                st.info("Wszystkie dostępne produkty zostały już rozdysponowane.")
+                st.info("Brak dostępnych pozycji magazynowych do ręcznego dodania.")
             else:
                 col_p1, col_p2, col_p3 = st.columns([3, 1, 1])
                 with col_p1:
@@ -902,107 +890,125 @@ elif menu == "Wydanie Towaru (WZ)":
                 
                 col_btn1, col_btn2 = st.columns(2)
                 with col_btn1:
-                    if st.button("Wyczyść lista produktów", use_container_width=True):
+                    if st.button("Wyczyść formularz", use_container_width=True):
                         st.session_state.wz_koszyk = []
+                        st.session_state.powiazane_zk = None
                         st.rerun()
                 with col_btn2:
                     if st.button("Zatwierdź wydanie i generuj PDF", type="primary", use_container_width=True):
-                        dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
-                        klient_adres = dane_klienta["Adres"]
-                        klient_nip = dane_klienta["NIP"]
-                        
-                        font_path, font_bold_path = pobierz_czcionki()
-                        pdf = FPDF()
-                        pdf.add_page()
-                        pdf.add_font("Roboto", "", font_path)
-                        pdf.add_font("Roboto", "B", font_bold_path)
-                        
-                        pdf.set_fill_color(240, 240, 240)
-                        pdf.set_font("Roboto", "B", 15)
-                        pdf.cell(0, 12, f"WYDANIE ZEWNĘTRZNE (WZ) NR {nr_wz_auto}", border=0, ln=1, align='C', fill=True)
-                        
-                        pdf.set_font("Roboto", "", 9)
-                        pdf.set_text_color(100, 100, 100)
-                        pdf.cell(0, 6, f"Data wydania: {datetime.now().strftime('%Y-%m-%d')}   |   Miejsce wystawienia: {MOJA_FIRMA['miejscowosc_wystawienia']}", border=0, ln=1, align='R')
-                        pdf.set_text_color(0, 0, 0) 
-                        pdf.ln(8)
-                        
-                        y_start = pdf.get_y()
-                        pdf.set_fill_color(248, 248, 248)
-                        pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(90, 7, "  SPRZEDAWCA / WYSTAWCA", border=0, ln=1, fill=True)
-                        pdf.set_font("Roboto", "", 9)
-                        pdf.multi_cell(90, 5, f"{MOJA_FIRMA['nazwa']}\n{MOJA_FIRMA['adres']}\n{MOJA_FIRMA['nip']}\n{MOJA_FIRMA['kontakt']}", border=0)
-                        y_left = pdf.get_y()
-                        
-                        pdf.set_xy(105, y_start)
-                        pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(90, 7, "  NABYWCA / ODBIORCA", border=0, ln=1, fill=True)
-                        pdf.set_xy(105, y_start + 7)
-                        pdf.set_font("Roboto", "", 9)
-                        nip_czysty = f"NIP: {klient_nip}" if pd.notna(klient_nip) and str(klient_nip).strip() else ""
-                        pdf.multi_cell(90, 5, f"{wybrany_klient}\n{klient_adres}\n{nip_czysty}", border=0)
-                        y_right = pdf.get_y()
-                        
-                        pdf.set_y(max(y_left, y_right) + 12)
-                        pdf.set_font("Roboto", "B", 10)
-                        pdf.cell(0, 8, "POZYCJE DOKUMENTU", border="B", ln=1)
-                        pdf.ln(3)
-                        
-                        pdf.set_fill_color(230, 235, 245)
-                        pdf.set_font("Roboto", "B", 9)
-                        pdf.cell(15, 8, "Lp.", border=1, align='C', fill=True)
-                        pdf.cell(115, 8, "Nazwa asortymentu", border=1, align='L', fill=True)
-                        pdf.cell(30, 8, "Ilość", border=1, align='C', fill=True)
-                        pdf.cell(30, 8, "Jm.", border=1, align='C', ln=1, fill=True)
-                        
-                        pdf.set_font("Roboto", "", 9)
-                        
-                        lp = 1
-                        for pozycja in st.session_state.wz_koszyk:
-                            nazwa_w = pozycja["Wariant"]
-                            ile_w = pozycja["Ilosc"]
+                        # GŁÓWNA WERYFIKACJA STANÓW
+                        bledy = False
+                        for item in st.session_state.wz_koszyk:
+                            stan_mag = st.session_state.produkty[st.session_state.produkty["Wariant"] == item["Wariant"]]["Stan"].values[0]
+                            if item["Ilosc"] > stan_mag:
+                                st.error(f"Braki magazynowe uniemożliwiają wydanie dla: {item['Wariant']}. Potrzeba {item['Ilosc']} szt., dostępnych: {int(stan_mag)} szt.")
+                                bledy = True
+                                
+                        if not bledy:
+                            dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
+                            klient_adres = dane_klienta["Adres"]
+                            klient_nip = dane_klienta["NIP"]
                             
-                            pdf.cell(15, 8, str(lp), border=1, align='C')
-                            pdf.cell(115, 8, nazwa_w, border=1, align='L')
-                            pdf.cell(30, 8, str(ile_w), border=1, align='C')
-                            pdf.cell(30, 8, "szt.", border=1, align='C', ln=1)
+                            font_path, font_bold_path = pobierz_czcionki()
+                            pdf = FPDF()
+                            pdf.add_page()
+                            pdf.add_font("Roboto", "", font_path)
+                            pdf.add_font("Roboto", "B", font_bold_path)
                             
-                            idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
-                            st.session_state.produkty.at[idx, "Stan"] -= ile_w
+                            pdf.set_fill_color(240, 240, 240)
+                            pdf.set_font("Roboto", "B", 15)
+                            pdf.cell(0, 12, f"WYDANIE ZEWNĘTRZNE (WZ) NR {nr_wz_auto}", border=0, ln=1, align='C', fill=True)
                             
-                            dodaj_ruch("WZ", nr_wz_auto, nazwa_w, ile_w, wybrany_klient)
-                            lp += 1
-                        
-                        st.session_state.wz_counter += 1
-                        
-                        pdf.ln(10)
-                        if uwagi_doc.strip():
-                            pdf.set_font("Roboto", "B", 9)
-                            pdf.cell(15, 5, "Uwagi:", border=0)
                             pdf.set_font("Roboto", "", 9)
-                            pdf.multi_cell(0, 5, uwagi_doc.strip(), border=0)
-                        
-                        pdf.ln(25)
-                        y_sig = pdf.get_y()
-                        pdf.set_font("Roboto", "", 8.5)
-                        pdf.set_xy(15, y_sig)
-                        pdf.cell(60, 5, "..........................................................", align='C', ln=1)
-                        pdf.set_x(15)
-                        pdf.cell(60, 5, f"Wystawił: {st.session_state.aktualny_uzytkownik}", align='C')
-                        
-                        pdf.set_xy(135, y_sig)
-                        pdf.cell(60, 5, "..........................................................", align='C', ln=1)
-                        pdf.set_x(135)
-                        pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
-                        
-                        pdf_bytes = bytes(pdf.output())
-                        st.session_state.archiwum_wz_pdf.append({"id": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "kontrahent": wybrany_klient, "pdf": pdf_bytes})
-                        
-                        st.session_state.wygenerowane_pdf = pdf_bytes
-                        st.session_state.nazwa_pliku_wz = f"{nr_wz_auto.replace('/', '_')}.pdf"
-                        st.session_state.wz_koszyk = []
-                        st.rerun()
+                            pdf.set_text_color(100, 100, 100)
+                            pdf.cell(0, 6, f"Data wydania: {datetime.now().strftime('%Y-%m-%d')}   |   Miejsce wystawienia: {MOJA_FIRMA['miejscowosc_wystawienia']}", border=0, ln=1, align='R')
+                            pdf.set_text_color(0, 0, 0) 
+                            pdf.ln(8)
+                            
+                            y_start = pdf.get_y()
+                            pdf.set_fill_color(248, 248, 248)
+                            pdf.set_font("Roboto", "B", 10)
+                            pdf.cell(90, 7, "  SPRZEDAWCA / WYSTAWCA", border=0, ln=1, fill=True)
+                            pdf.set_font("Roboto", "", 9)
+                            pdf.multi_cell(90, 5, f"{MOJA_FIRMA['nazwa']}\n{MOJA_FIRMA['adres']}\n{MOJA_FIRMA['nip']}\n{MOJA_FIRMA['kontakt']}", border=0)
+                            y_left = pdf.get_y()
+                            
+                            pdf.set_xy(105, y_start)
+                            pdf.set_font("Roboto", "B", 10)
+                            pdf.cell(90, 7, "  NABYWCA / ODBIORCA", border=0, ln=1, fill=True)
+                            pdf.set_xy(105, y_start + 7)
+                            pdf.set_font("Roboto", "", 9)
+                            nip_czysty = f"NIP: {klient_nip}" if pd.notna(klient_nip) and str(klient_nip).strip() else ""
+                            pdf.multi_cell(90, 5, f"{wybrany_klient}\n{klient_adres}\n{nip_czysty}", border=0)
+                            y_right = pdf.get_y()
+                            
+                            pdf.set_y(max(y_left, y_right) + 12)
+                            pdf.set_font("Roboto", "B", 10)
+                            pdf.cell(0, 8, "POZYCJE DOKUMENTU", border="B", ln=1)
+                            pdf.ln(3)
+                            
+                            pdf.set_fill_color(230, 235, 245)
+                            pdf.set_font("Roboto", "B", 9)
+                            pdf.cell(15, 8, "Lp.", border=1, align='C', fill=True)
+                            pdf.cell(115, 8, "Nazwa asortymentu", border=1, align='L', fill=True)
+                            pdf.cell(30, 8, "Ilość", border=1, align='C', fill=True)
+                            pdf.cell(30, 8, "Jm.", border=1, align='C', ln=1, fill=True)
+                            
+                            pdf.set_font("Roboto", "", 9)
+                            
+                            lp = 1
+                            for pozycja in st.session_state.wz_koszyk:
+                                nazwa_w = pozycja["Wariant"]
+                                ile_w = pozycja["Ilosc"]
+                                
+                                pdf.cell(15, 8, str(lp), border=1, align='C')
+                                pdf.cell(115, 8, nazwa_w, border=1, align='L')
+                                pdf.cell(30, 8, str(ile_w), border=1, align='C')
+                                pdf.cell(30, 8, "szt.", border=1, align='C', ln=1)
+                                
+                                idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
+                                st.session_state.produkty.at[idx, "Stan"] -= ile_w
+                                
+                                dodaj_ruch("WZ", nr_wz_auto, nazwa_w, ile_w, wybrany_klient)
+                                lp += 1
+                            
+                            st.session_state.wz_counter += 1
+                            
+                            # Automatyczne zamykanie powiązanego ZK
+                            if st.session_state.powiazane_zk:
+                                for zmw in st.session_state.zamowienia:
+                                    if zmw["id"] == st.session_state.powiazane_zk:
+                                        zmw["Status"] = "Zrealizowane"
+                                        break
+                                st.session_state.powiazane_zk = None
+                            
+                            pdf.ln(10)
+                            if uwagi_doc.strip():
+                                pdf.set_font("Roboto", "B", 9)
+                                pdf.cell(15, 5, "Uwagi:", border=0)
+                                pdf.set_font("Roboto", "", 9)
+                                pdf.multi_cell(0, 5, uwagi_doc.strip(), border=0)
+                            
+                            pdf.ln(25)
+                            y_sig = pdf.get_y()
+                            pdf.set_font("Roboto", "", 8.5)
+                            pdf.set_xy(15, y_sig)
+                            pdf.cell(60, 5, "..........................................................", align='C', ln=1)
+                            pdf.set_x(15)
+                            pdf.cell(60, 5, f"Wystawił: {st.session_state.aktualny_uzytkownik}", align='C')
+                            
+                            pdf.set_xy(135, y_sig)
+                            pdf.cell(60, 5, "..........................................................", align='C', ln=1)
+                            pdf.set_x(135)
+                            pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
+                            
+                            pdf_bytes = bytes(pdf.output())
+                            st.session_state.archiwum_wz_pdf.append({"id": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "kontrahent": wybrany_klient, "pdf": pdf_bytes})
+                            
+                            st.session_state.wygenerowane_pdf = pdf_bytes
+                            st.session_state.nazwa_pliku_wz = f"{nr_wz_auto.replace('/', '_')}.pdf"
+                            st.session_state.wz_koszyk = []
+                            st.rerun()
 
 elif menu == "Archiwum Dokumentów":
     st.header("Archiwum Dokumentów Operacyjnych i Technologicznych")
