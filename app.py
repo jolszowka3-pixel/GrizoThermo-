@@ -129,7 +129,7 @@ def create_pdf_konfekcja(nr_dok, zuzyto_jumbo, szablony, zsumowane_wyroby, uzytk
             pdf.cell(40, 6, f"{q} szt.", align="C")
             pdf.cell(0, 6, f"{szer * q} cm", border="R", align="C", ln=1)
             
-        pdf.set_font("Roboto", "I", 9)
+        pdf.set_font("Roboto", "", 9) # ZMIANA: Z "I" (kursywa) na "" (normalna czcionka), by uniknąć błędu FPDFException
         odpad = 115 - suma_cm
         pdf.cell(0, 6, f" *Wykorzystano {suma_cm} cm z 115 cm. Odpad/ścinka: {odpad} cm.", border="LRB", ln=1)
         pdf.ln(4)
@@ -194,10 +194,10 @@ def create_pdf_oklejanie(nr_dok, operacje, uzytkownik):
     return bytes(pdf.output())
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V45)
+# 1. INICJALIZACJA BAZY (WERSJA V46)
 # ==========================================
-if 'init_v45' not in st.session_state:
-    st.session_state.init_v45 = True
+if 'init_v46' not in st.session_state:
+    st.session_state.init_v46 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -668,12 +668,12 @@ elif menu == "Moduł Production":
         }
 
     if "wygenerowane_raporty_prod" in st.session_state and st.session_state.wygenerowane_raporty_prod:
-        st.success("Operacja zakończona sukcesem! Druk wysłany. (Opcjonalny przycisk ręcznego pobrania poniżej):")
+        st.success("Operacja zakończona sukcesem! Twoje pliki PDF są gotowe do ponownego pobrania (opcjonalnie):")
         num_docs = len(st.session_state.wygenerowane_raporty_prod)
         cols = st.columns(num_docs + 1)
         for i, doc in enumerate(st.session_state.wygenerowane_raporty_prod):
             cols[i].download_button(
-                label=f"📄 {doc['nazwa']}",
+                label=f"📄 Pobierz {doc['nazwa']}",
                 data=doc['pdf'],
                 file_name=doc['nazwa'],
                 mime="application/pdf",
@@ -687,7 +687,6 @@ elif menu == "Moduł Production":
 
     tab_plan, tab_wydruk, tab1, tab2, tab3 = st.tabs(["Panel MRP (Analiza)", "Wydruk Planu dla Hali", "Krok 1: Wytłaczanie", "Krok 2: Rozkrój", "Krok 3: Oklejanie"])
     
-    # --- ZAKŁADKA 0: PANEL MRP ---
     with tab_plan:
         st.subheader("Inteligentna Analiza Zapotrzebowania (MRP)")
         
@@ -754,7 +753,7 @@ elif menu == "Moduł Production":
                                 dodaj_ruch("RW", nr_jmb_auto, nazwa_sur, laczne_zuzycie, "Auto-Planer")
                                 surowce_zuzyte.append({"nazwa": nazwa_sur, "ilosc": laczne_zuzycie, "jm": jm_sur})
                             
-                            b_pdf_jmb = create_pdf_jumbo(nr_jmb_auto, bj, surowce_zuzyte, st.session_state.aktualny_uzytkownik)
+                            b_pdf_jmb = create_pdf_jumbo(nr_jmb_auto, bj, surowce_zuzyte, "System Auto-Planer")
                             st.session_state.archiwum_jumbo_pdf.append({"id": nr_jmb_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "ilosc": bj, "pdf": b_pdf_jmb})
                             raporty_generowane.append({"nazwa": f"{nr_jmb_auto.replace('/', '_')}.pdf", "pdf": b_pdf_jmb})
                             st.session_state.do_pobrania.append({"nazwa": f"{nr_jmb_auto.replace('/', '_')}.pdf", "data": b_pdf_jmb})
@@ -777,7 +776,7 @@ elif menu == "Moduł Production":
                                 st.session_state.produkty.at[idx, "Stan"] += total_qty
                                 dodaj_ruch("PW (Gotowe)", nr_knf_auto, nazwa_gotowego, total_qty, "Auto-Planer")
                             
-                            b_pdf_knf = create_pdf_konfekcja(nr_knf_auto, pj, mrp_data["szablony_lista_pdf"], total_produced, st.session_state.aktualny_uzytkownik)
+                            b_pdf_knf = create_pdf_konfekcja(nr_knf_auto, pj, mrp_data["szablony_lista_pdf"], total_produced, "System Auto-Planer")
                             st.session_state.archiwum_konf_pdf.append({"id": nr_knf_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "jumbo_szt": pj, "pdf": b_pdf_knf})
                             raporty_generowane.append({"nazwa": f"{nr_knf_auto.replace('/', '_')}.pdf", "pdf": b_pdf_knf})
                             st.session_state.do_pobrania.append({"nazwa": f"{nr_knf_auto.replace('/', '_')}.pdf", "data": b_pdf_knf})
@@ -799,14 +798,14 @@ elif menu == "Moduł Production":
                                 dodaj_ruch("PW (Gotowe)", nr_okl_auto, b["Wariant"], b["Brak_szt"], "Auto-Planer")
                                 op_list.append({"z": b["Z_czego"], "do": b["Wariant"].split(" - ")[0], "ilosc": b["Brak_szt"]})
                             
-                            b_pdf_okl = create_pdf_oklejanie(nr_okl_auto, op_list, st.session_state.aktualny_uzytkownik)
+                            b_pdf_okl = create_pdf_oklejanie(nr_okl_auto, op_list, "System Auto-Planer")
                             st.session_state.archiwum_okl_pdf.append({"id": nr_okl_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "opis": "Proces oklejania 1-Click", "pdf": b_pdf_okl})
                             raporty_generowane.append({"nazwa": f"{nr_okl_auto.replace('/', '_')}.pdf", "pdf": b_pdf_okl})
                             st.session_state.do_pobrania.append({"nazwa": f"{nr_okl_auto.replace('/', '_')}.pdf", "data": b_pdf_okl})
                             st.session_state.okl_counter += 1
 
                         st.session_state.wygenerowane_raporty_prod = raporty_generowane
-                        st.session_state.powiadomienie_sukces = "Cały łańcuch produkcyjny zrealizowany! Pobieranie instrukcji w tle..."
+                        st.session_state.powiadomienie_sukces = "Cały łańcuch produkcyjny zrealizowany! Karty pobierają się w tle."
                         st.rerun()
                 else:
                     st.button("Zleć i Zrealizuj Automatycznie", disabled=True, use_container_width=True)
@@ -877,7 +876,7 @@ elif menu == "Moduł Production":
                             pdf.cell(40, 6, f"{q} szt.", align="C")
                             pdf.cell(0, 6, f"{szer * q} cm", border="R", align="C", ln=1)
                         
-                        pdf.set_font("Roboto", "I", 9)
+                        pdf.set_font("Roboto", "", 9)
                         odpad = 115 - suma_cm
                         pdf.cell(0, 6, f" *Wykorzystano {suma_cm} cm z 115 cm. Odpad/ścinka: {odpad} cm.", border="LRB", ln=1)
                         pdf.ln(2)
@@ -912,7 +911,6 @@ elif menu == "Moduł Production":
                 st.session_state.powiadomienie_sukces = "Wygenerowano raport Planu. Pobieranie rozpoczęte."
                 st.rerun()
 
-    # --- KROK 1 (RĘCZNY) ---
     with tab1:
         st.subheader("Wytłaczanie Rolek Jumbo (115cm x 13mb) - RĘCZNIE")
         s_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
@@ -963,7 +961,6 @@ elif menu == "Moduł Production":
         else:
             st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
 
-    # --- KROK 2 (RĘCZNY) ---
     with tab2:
         st.subheader("Konfekcja (Tworzenie Zlecenia Rozkroju) - RĘCZNIE")
         s_jumbo = int(st.session_state.polprodukty.at[0, "Stan"])
@@ -1068,7 +1065,6 @@ elif menu == "Moduł Production":
                     st.session_state.powiadomienie_sukces = "Zlecenie konfekcji wygenerowane i pobrane."
                     st.rerun()
 
-    # --- KROK 3 (RĘCZNY) ---
     with tab3:
         st.subheader("Oklejanie (Tworzenie wariantu 'Oklejona') - RĘCZNIE")
         st.write("Wybierz rolki Nieoklejone z magazynu i zewidencjuj proces nałożenia okleiny.")
