@@ -21,13 +21,13 @@ ID_ARKUSZA_GOOGLE = "https://docs.google.com/spreadsheets/d/1kmiEb4jaUSmZSsqsi6L
 def podlacz_google_sheets():
     try:
         creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
-        scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(creds)
         sheet = client.open_by_key(ID_ARKUSZA_GOOGLE)
         return sheet
     except Exception as e:
-        st.error("Błąd połączenia z bazą danych (Sprawdź Streamlit Secrets i ID Arkusza).")
+        st.error(f"Szczegóły błędu połączenia: {e}")
         return None
 
 def zapisz_w_chmurze(sheet, nazwa_zakladki, df):
