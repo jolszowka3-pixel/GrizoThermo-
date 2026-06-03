@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V37 - 3 ETAPY PRODUKCJI)
+# 1. INICJALIZACJA BAZY (WERSJA V38)
 # ==========================================
-if 'init_v37' not in st.session_state:
-    st.session_state.init_v37 = True
+if 'init_v38' not in st.session_state:
+    st.session_state.init_v38 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -379,9 +379,128 @@ elif menu == "Zamówienia (ZK)":
 elif menu == "Moduł Production":
     st.header("Zarządzanie Produkcją i Planowanie")
     
+    # ----------------------------------------------------
+    # GŁÓWNY SILNIK KALKULACYJNY MRP (DZIAŁA W TLE DLA ZAKŁADEK)
+    # ----------------------------------------------------
+    oczekujace = [z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"]
+    mrp_data = None
+    
+    if oczekujace:
+        zapotrzebowanie = {}
+        for z in oczekujace:
+            for p in z["pozycje"]:
+                wariant = p["Wariant"]
+                zapotrzebowanie[wariant] = zapotrzebowanie.get(wariant, 0) + p["Ilość (szt.)"]
+                
+        braki_do_oklejenia = []
+        braki_do_rozkroju = []
+        
+        szerokosci_baza = [10, 15, 20, 25, 30, 35, 115]
+        for szer in szerokosci_baza:
+            war_okl = f"GrizoThermo+ {szer}cm - Oklejona (13mb)"
+            war_nie = f"GrizoThermo+ {szer}cm - Nieoklejona (13mb)"
+            
+            dem_okl = zapotrzebowanie.get(war_okl, 0)
+            dem_nie = zapotrzebowanie.get(war_nie, 0)
+            
+            stock_okl = st.session_state.produkty[st.session_state.produkty["Wariant"] == war_okl]["Stan"].values[0]
+            stock_nie = st.session_state.produkty[st.session_state.produkty["Wariant"] == war_nie]["Stan"].values[0]
+            
+            brakuje_okl = max(0, dem_okl - stock_okl)
+            brakuje_nie = max(0, dem_nie - stock_nie)
+            nadwyzka_nie = max(0, stock_nie - dem_nie)
+            
+            if brakuje_okl > 0:
+                braki_do_oklejenia.append({"Wariant": war_okl, "Brak_szt": int(brakuje_okl), "Z_czego": war_nie})
+            
+            pokryte_z_mag_nieokl = min(brakuje_okl, nadwyzka_nie)
+            do_wyciecia_łącznie = brakuje_nie + (brakuje_okl - pokryte_z_mag_nieokl)
+            
+            if do_wyciecia_łącznie > 0:
+                braki_do_rozkroju.append({"Wariant": war_nie, "Brak_szt": int(do_wyciecia_łącznie), "Szerokosc": int(szer)})
+        
+        # Algorytm pakowania - Strict 115cm i max 6 elementów
+        items_to_pack = []
+        for b in braki_do_rozkroju:
+            items_to_pack.extend([(b["Wariant"], b["Szerokosc"])] * b["Brak_szt"])
+        
+        items_to_pack.sort(key=lambda x: x[1], reverse=True)
+        
+        def is_valid_partial(used_cm, count):
+            rem = 115 - used_cm
+            c = 6 - count
+            if rem == 0: return True
+            if rem < 0: return False
+            if c == 0: return False
+            if rem == 5: return False
+            if rem > 35 * c: return False
+            return True
+
+        plan_rolek = []
+        while items_to_pack:
+            rolka = {}
+            used_cm = 0
+            count = 0
+            i = 0
+            while i < len(items_to_pack):
+                nazwa, szer = items_to_pack[i]
+                if is_valid_partial(used_cm + szer, count + 1):
+                    rolka[nazwa] = rolka.get(nazwa, 0) + 1
+                    used_cm += szer
+                    count += 1
+                    items_to_pack.pop(i)
+                    if used_cm == 115 or count == 6:
+                        break
+                else:
+                    i += 1
+                    
+            while used_cm < 115:
+                for pw in [35, 30, 25, 20, 15, 10]:
+                    if is_valid_partial(used_cm + pw, count + 1):
+                        pad_nazwa = f"GrizoThermo+ {pw}cm - Nieoklejona (13mb)"
+                        rolka[pad_nazwa] = rolka.get(pad_nazwa, 0) + 1
+                        used_cm += pw
+                        count += 1
+                        break
+                
+            plan_rolek.append(rolka)
+        
+        potrzeba_jumbo_calkowita = len(plan_rolek)
+        s_jumbo_akt = int(st.session_state.polprodukty.at[0, "Stan"])
+        brakuje_jumbo = max(0, potrzeba_jumbo_calkowita - s_jumbo_akt)
+        
+        req_alu = brakuje_jumbo * st.session_state.receptura_baza["K01"]
+        req_bia = brakuje_jumbo * st.session_state.receptura_baza["K02"]
+        req_zie = brakuje_jumbo * st.session_state.receptura_baza["K03"]
+        
+        stan_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
+        stan_bia = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K02", "Stan"].values[0]
+        stan_zie = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K03", "Stan"].values[0]
+        gotowe_do_auto = (stan_alu >= req_alu and stan_bia >= req_bia and stan_zie >= req_zie)
+
+        zliczone_szablony = {}
+        for r in plan_rolek:
+            klucz = str(dict(sorted(r.items())))
+            if klucz not in zliczone_szablony:
+                zliczone_szablony[klucz] = {"wzor": r, "ile": 1}
+            else:
+                zliczone_szablony[klucz]["ile"] += 1
+                
+        mrp_data = {
+            "braki_okl": braki_do_oklejenia,
+            "braki_nie": braki_do_rozkroju,
+            "potrzeba_jmb": potrzeba_jumbo_calkowita,
+            "s_jumbo_akt": s_jumbo_akt,
+            "brakuje_jumbo": brakuje_jumbo,
+            "req_alu": req_alu, "req_bia": req_bia, "req_zie": req_zie,
+            "szablony": zliczone_szablony,
+            "plan_rolek": plan_rolek,
+            "gotowe_do_auto": gotowe_do_auto
+        }
+
     # Powiadomienia operacyjne
     if "ostatnia_produkcja_pdf" in st.session_state:
-        st.success(f"Zaksięgowano pomyślnie raport w archiwum.")
+        st.success(f"Zaksięgowano pomyślnie akcję na hali.")
         st.download_button(
             label="Pobierz wygenerowany dokument ostatniej akcji (.pdf)",
             data=st.session_state.ostatnia_produkcja_pdf,
@@ -392,11 +511,11 @@ elif menu == "Moduł Production":
         st.divider()
 
     if "ostatni_raport_zk_pdf" in st.session_state:
-        st.success("Wygenerowano raport produkcyjny z planowania.")
+        st.success("Wygenerowano kompleksowy plan produkcji dla hali.")
         st.download_button(
-            label="Pobierz Raport Zapotrzebowania i Plan Produkcji (.pdf)",
+            label="Pobierz Dzienny Plan dla Operatorów (.pdf)",
             data=st.session_state.ostatni_raport_zk_pdf,
-            file_name="Raport_Planowania_Produkcji.pdf",
+            file_name="Plan_Dla_Hali.pdf",
             mime="application/pdf",
             use_container_width=True
         )
@@ -406,52 +525,19 @@ elif menu == "Moduł Production":
         st.success(st.session_state.auto_success)
         del st.session_state.auto_success
     
-    tab_plan, tab1, tab2, tab3 = st.tabs(["Planowanie (Auto)", "KROK 1: Maszyna Główna", "KROK 2: Konfekcja", "KROK 3: Oklejanie"])
+    # ----------------------------------------------------
+    # NOWY PODZIAŁ ZAKŁADEK (WYDRUK WYDZIELONY)
+    # ----------------------------------------------------
+    tab_plan, tab_wydruk, tab1, tab2, tab3 = st.tabs(["Panel MRP (Analiza)", "Wydruk Planu dla Hali", "Krok 1: Wytłaczanie", "Krok 2: Rozkrój", "Krok 3: Oklejanie"])
     
-    # --- KROK 0: PLANOWANIE Z ZAMÓWIEŃ (3 ETAPY) ---
+    # --- ZAKŁADKA 0: PANEL MRP ---
     with tab_plan:
         st.subheader("Inteligentna Analiza Zapotrzebowania (MRP)")
-        st.write("System analizuje zamówienia i zderza je z magazynem (Brakujące sztuki, nadwyżki, cięcie, oklejanie).")
         
-        oczekujace = [z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"]
-        if not oczekujace:
+        if not mrp_data:
             st.info("Brak oczekujących zamówień zlecających produkcję. Magazyn nie wymaga uzupełnień celowych.")
         else:
-            zapotrzebowanie = {}
-            for z in oczekujace:
-                for p in z["pozycje"]:
-                    wariant = p["Wariant"]
-                    zapotrzebowanie[wariant] = zapotrzebowanie.get(wariant, 0) + p["Ilość (szt.)"]
-                    
-            braki_do_oklejenia = []
-            braki_do_rozkroju = []
-            
-            szerokosci_baza = [10, 15, 20, 25, 30, 35, 115]
-            for szer in szerokosci_baza:
-                war_okl = f"GrizoThermo+ {szer}cm - Oklejona (13mb)"
-                war_nie = f"GrizoThermo+ {szer}cm - Nieoklejona (13mb)"
-                
-                dem_okl = zapotrzebowanie.get(war_okl, 0)
-                dem_nie = zapotrzebowanie.get(war_nie, 0)
-                
-                stock_okl = st.session_state.produkty[st.session_state.produkty["Wariant"] == war_okl]["Stan"].values[0]
-                stock_nie = st.session_state.produkty[st.session_state.produkty["Wariant"] == war_nie]["Stan"].values[0]
-                
-                brakuje_okl = max(0, dem_okl - stock_okl)
-                brakuje_nie = max(0, dem_nie - stock_nie)
-                nadwyzka_nie = max(0, stock_nie - dem_nie)
-                
-                if brakuje_okl > 0:
-                    braki_do_oklejenia.append({"Wariant": war_okl, "Brak_szt": int(brakuje_okl), "Z_czego": war_nie})
-                
-                # Używamy nadwyżki nieoklejonej, by zaspokoić braki oklejonej (zanim zlecimy cięcie Jumbo)
-                pokryte_z_mag_nieokl = min(brakuje_okl, nadwyzka_nie)
-                do_wyciecia_łącznie = brakuje_nie + (brakuje_okl - pokryte_z_mag_nieokl)
-                
-                if do_wyciecia_łącznie > 0:
-                    braki_do_rozkroju.append({"Wariant": war_nie, "Brak_szt": int(do_wyciecia_łącznie), "Szerokosc": int(szer)})
-            
-            if not braki_do_oklejenia and not braki_do_rozkroju:
+            if not mrp_data["braki_okl"] and not mrp_data["braki_nie"]:
                 st.success("Masz wystarczającą ilość produktów na magazynie, aby zrealizować wszystkie bieżące zamówienia.")
             else:
                 st.error("Wykryto braki asortymentu w stosunku do zamówień. Wymagane procesy produkcyjne.")
@@ -459,273 +545,217 @@ elif menu == "Moduł Production":
                 col_b1, col_b2 = st.columns(2)
                 with col_b1:
                     st.write("**Wymagany KROK 2: Rozkrój Jumbo na (Nieoklejone)**")
-                    if braki_do_rozkroju: st.dataframe(pd.DataFrame(braki_do_rozkroju)[["Wariant", "Brak_szt"]], hide_index=True)
+                    if mrp_data["braki_nie"]: st.dataframe(pd.DataFrame(mrp_data["braki_nie"])[["Wariant", "Brak_szt"]], hide_index=True)
                     else: st.info("Brak potrzeb rozkroju.")
                 with col_b2:
                     st.write("**Wymagany KROK 3: Oklejanie**")
-                    if braki_do_oklejenia: st.dataframe(pd.DataFrame(braki_do_oklejenia)[["Wariant", "Brak_szt"]], hide_index=True)
+                    if mrp_data["braki_okl"]: st.dataframe(pd.DataFrame(mrp_data["braki_okl"])[["Wariant", "Brak_szt"]], hide_index=True)
                     else: st.info("Brak potrzeb oklejania.")
-                
-                # Algorytm pakowania - Strict 115cm i max 6 elementów (TYLKO DLA NIEOKLEJONYCH)
-                items_to_pack = []
-                for b in braki_do_rozkroju:
-                    items_to_pack.extend([(b["Wariant"], b["Szerokosc"])] * b["Brak_szt"])
-                
-                items_to_pack.sort(key=lambda x: x[1], reverse=True)
-                
-                def is_valid_partial(used_cm, count):
-                    rem = 115 - used_cm
-                    c = 6 - count
-                    if rem == 0: return True
-                    if rem < 0: return False
-                    if c == 0: return False
-                    if rem == 5: return False
-                    if rem > 35 * c: return False
-                    return True
-
-                plan_rolek = []
-                while items_to_pack:
-                    rolka = {}
-                    used_cm = 0
-                    count = 0
-                    i = 0
-                    while i < len(items_to_pack):
-                        nazwa, szer = items_to_pack[i]
-                        if is_valid_partial(used_cm + szer, count + 1):
-                            rolka[nazwa] = rolka.get(nazwa, 0) + 1
-                            used_cm += szer
-                            count += 1
-                            items_to_pack.pop(i)
-                            if used_cm == 115 or count == 6:
-                                break
-                        else:
-                            i += 1
-                            
-                    while used_cm < 115:
-                        for pw in [35, 30, 25, 20, 15, 10]:
-                            if is_valid_partial(used_cm + pw, count + 1):
-                                pad_nazwa = f"GrizoThermo+ {pw}cm - Nieoklejona (13mb)"
-                                rolka[pad_nazwa] = rolka.get(pad_nazwa, 0) + 1
-                                used_cm += pw
-                                count += 1
-                                break
-                        
-                    plan_rolek.append(rolka)
-                
-                potrzeba_jumbo_calkowita = len(plan_rolek)
-                s_jumbo_akt = int(st.session_state.polprodukty.at[0, "Stan"])
-                brakuje_jumbo = max(0, potrzeba_jumbo_calkowita - s_jumbo_akt)
 
                 st.divider()
                 st.subheader("Bilanse Wytłaczarki i Surowców (KROK 1)")
-                if potrzeba_jumbo_calkowita > 0:
-                    st.write(f"Do pocięcia potrzebujesz łącznie: **{potrzeba_jumbo_calkowita} szt. rolek Jumbo**.")
-                    st.write(f"Twój aktualny stan rolek Jumbo: **{s_jumbo_akt} szt.**")
+                if mrp_data["potrzeba_jmb"] > 0:
+                    st.write(f"Do pocięcia potrzebujesz łącznie: **{mrp_data['potrzeba_jmb']} szt. rolek Jumbo**.")
+                    st.write(f"Twój aktualny stan rolek Jumbo: **{mrp_data['s_jumbo_akt']} szt.**")
 
-                gotowe_do_auto = False
-                if brakuje_jumbo > 0:
-                    st.warning(f"Zlecenia wymagają wytłoczenia dodatkowych **{brakuje_jumbo} szt.** rolek Jumbo na Maszynie Głównej.")
-                    
-                    req_alu = brakuje_jumbo * st.session_state.receptura_baza["K01"]
-                    req_bia = brakuje_jumbo * st.session_state.receptura_baza["K02"]
-                    req_zie = brakuje_jumbo * st.session_state.receptura_baza["K03"]
-                    
-                    stan_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
-                    stan_bia = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K02", "Stan"].values[0]
-                    stan_zie = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K03", "Stan"].values[0]
-                    
-                    if stan_alu >= req_alu and stan_bia >= req_bia and stan_zie >= req_zie:
+                if mrp_data["brakuje_jumbo"] > 0:
+                    st.warning(f"Zlecenia wymagają wytłoczenia dodatkowych **{mrp_data['brakuje_jumbo']} szt.** rolek Jumbo na Maszynie Głównej.")
+                    if mrp_data["gotowe_do_auto"]:
                         st.success("Magazyn surowców w pełni pokrywa zapotrzebowanie na wytłoczenie tych rolek.")
-                        gotowe_do_auto = True
                     else:
                         st.error("BRAK SUROWCÓW do wytłoczenia potrzebnych rolek Jumbo! Należy wystawić zapotrzebowanie dla dostawców.")
                 else:
-                    if potrzeba_jumbo_calkowita > 0:
+                    if mrp_data["potrzeba_jmb"] > 0:
                         st.success("Posiadasz wystarczającą ilość rolek Jumbo na magazynie, aby przejść od razu do konfekcji.")
-                    gotowe_do_auto = True
 
-                zliczone_szablony = {}
-                if potrzeba_jumbo_calkowita > 0:
+                if mrp_data["potrzeba_jmb"] > 0:
                     st.write("")
                     st.subheader("Zoptymalizowany Plan Konfekcji (KROK 2)")
-                    
-                    for r in plan_rolek:
-                        klucz = str(dict(sorted(r.items())))
-                        if klucz not in zliczone_szablony:
-                            zliczone_szablony[klucz] = {"wzor": r, "ile": 1}
-                        else:
-                            zliczone_szablony[klucz]["ile"] += 1
-                            
-                    for i, (_, dane) in enumerate(zliczone_szablony.items()):
+                    for i, (_, dane) in enumerate(mrp_data["szablony"].items()):
                         wzor_txt = " | ".join([f"{qty}x {k.split(' - ')[0].replace('GrizoThermo+ ', '')}" for k, qty in dane["wzor"].items()])
                         st.markdown(f"**SZABLON {i+1}** (Użyj na **{dane['ile']} szt.** rolek Jumbo): {wzor_txt}")
                     
                 st.divider()
-                
-                # --- Przyciski Akcji ---
-                col_akcja1, col_akcja2 = st.columns(2)
-                
-                with col_akcja1:
-                    if st.button("Generuj PDF Raportu Zapotrzebowania i Planu", use_container_width=True):
+                if mrp_data["gotowe_do_auto"]:
+                    if st.button("Zleć i Zrealizuj Automatycznie (Wszystkie 3 kroki)", type="primary", use_container_width=True):
+                        data_dzis_str = datetime.now().strftime("%Y/%m/%d")
                         font_path, font_bold_path = pobierz_czcionki()
-                        pdf = FPDF()
-                        pdf.add_page()
-                        pdf.add_font("Roboto", "", font_path)
-                        pdf.add_font("Roboto", "B", font_bold_path)
                         
-                        pdf.set_fill_color(240, 240, 240)
-                        pdf.set_font("Roboto", "B", 14)
-                        pdf.cell(0, 12, "RAPORT ZAPOTRZEBOWANIA I SUGEROWANY PLAN PRODUKCJI", border=0, ln=1, align='C', fill=True)
-                        
-                        pdf.set_font("Roboto", "", 9)
-                        pdf.cell(0, 6, f"Wygenerowano: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", border=0, ln=1, align='C')
-                        pdf.ln(6)
-                        
-                        if braki_do_rozkroju:
-                            pdf.set_font("Roboto", "B", 11)
-                            pdf.cell(0, 6, "1. DO WYCIĘCIA NA KONFEKCJI (NIEOKLEJONE)", border="B", ln=1)
-                            pdf.set_font("Roboto", "B", 9)
-                            pdf.cell(140, 6, "Asortyment", border=1)
-                            pdf.cell(50, 6, "Ilość", border=1, ln=1, align='C')
-                            pdf.set_font("Roboto", "", 9)
-                            for b in braki_do_rozkroju:
-                                pdf.cell(140, 6, b["Wariant"], border=1)
-                                pdf.cell(50, 6, f"{b['Brak_szt']} szt.", border=1, ln=1, align='C')
-                            pdf.ln(4)
+                        # 1. AUTO WYTŁACZANIE
+                        if mrp_data["brakuje_jumbo"] > 0:
+                            bj = mrp_data["brakuje_jumbo"]
+                            nr_jmb_auto = f"PR-JMB/{data_dzis_str}/{st.session_state.jumbo_counter:03d}"
+                            st.session_state.polprodukty.at[0, "Stan"] += bj
+                            dodaj_ruch("PW (Półprod.)", nr_jmb_auto, st.session_state.polprodukty.at[0, "Nazwa"], bj, "Auto-Planer")
                             
-                        if braki_do_oklejenia:
-                            pdf.set_font("Roboto", "B", 11)
-                            pdf.cell(0, 6, "2. DO PRZETWORZENIA W STACJI OKLEJANIA", border="B", ln=1)
-                            pdf.set_font("Roboto", "B", 9)
-                            pdf.cell(140, 6, "Asortyment Wynikowy (Oklejony)", border=1)
-                            pdf.cell(50, 6, "Ilość", border=1, ln=1, align='C')
-                            pdf.set_font("Roboto", "", 9)
-                            for b in braki_do_oklejenia:
-                                pdf.cell(140, 6, b["Wariant"], border=1)
-                                pdf.cell(50, 6, f"{b['Brak_szt']} szt.", border=1, ln=1, align='C')
-                            pdf.ln(4)
+                            for k_id, zuzycie in st.session_state.receptura_baza.items():
+                                idx = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == k_id][0]
+                                laczne_zuzycie = zuzycie * bj
+                                st.session_state.komponenty.at[idx, "Stan"] -= laczne_zuzycie
+                                dodaj_ruch("RW", nr_jmb_auto, st.session_state.komponenty.at[idx, "Nazwa"], laczne_zuzycie, "Auto-Planer")
                             
-                        pdf.set_font("Roboto", "B", 11)
-                        pdf.cell(0, 6, "3. PLAN PRODUKCJI - WYTŁACZANIE JUMBO (KROK 1)", border="B", ln=1)
-                        pdf.set_font("Roboto", "", 10)
-                        pdf.cell(0, 8, f"Stan magazynowy Jumbo: {s_jumbo_akt} szt.  |  Całkowite zapotrzebowanie na Jumbo: {potrzeba_jumbo_calkowita} szt.", ln=1)
-                        pdf.cell(0, 8, f"Do wyprodukowania: {brakuje_jumbo} szt. rolek Jumbo.", ln=1)
-                        pdf.ln(4)
-                        
-                        if potrzeba_jumbo_calkowita > 0:
-                            pdf.set_font("Roboto", "B", 11)
-                            pdf.cell(0, 6, "4. OPTYMALNY PLAN ROZKROJU ROLEK JUMBO (KROK 2)", border="B", ln=1)
-                            pdf.ln(2)
+                            pdf_jmb = FPDF()
+                            pdf_jmb.add_page()
+                            pdf_jmb.add_font("Roboto", "", font_path)
+                            pdf_jmb.add_font("Roboto", "B", font_bold_path)
+                            pdf_jmb.set_fill_color(240, 240, 240)
+                            pdf_jmb.set_font("Roboto", "B", 14)
+                            pdf_jmb.cell(0, 12, f"KARTA PRZEBIEGU PRODUKCJI JUMBO: {nr_jmb_auto} (AUTO)", border=0, ln=1, align='C', fill=True)
+                            pdf_jmb.set_font("Roboto", "", 10)
+                            pdf_jmb.cell(0, 8, f"Wyprodukowano automatycznie: {bj} szt.", ln=1)
                             
-                            for i, (_, dane) in enumerate(zliczone_szablony.items()):
-                                pdf.set_font("Roboto", "B", 10)
-                                pdf.set_fill_color(248, 248, 248)
-                                pdf.cell(0, 8, f" SZABLON NR {i+1} (Użyć dla {dane['ile']} szt. rolek Jumbo)", border=1, ln=1, fill=True)
-                                pdf.set_font("Roboto", "", 9)
-                                for n, q in dane["wzor"].items():
-                                    pdf.cell(10, 6, "-", align='R')
-                                    pdf.cell(120, 6, n)
-                                    pdf.cell(40, 6, f"Wytnij: {q} szt.", ln=1)
-                                pdf.ln(3)
+                            st.session_state.archiwum_jumbo_pdf.append({"id": nr_jmb_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "ilosc": bj, "pdf": bytes(pdf_jmb.output())})
+                            st.session_state.jumbo_counter += 1
                             
-                        st.session_state.ostatni_raport_zk_pdf = bytes(pdf.output())
+                        # 2. AUTO ROZKRÓJ
+                        if mrp_data["potrzeba_jmb"] > 0:
+                            pj = mrp_data["potrzeba_jmb"]
+                            nr_knf_auto = f"PR-KNF/{data_dzis_str}/{st.session_state.konf_counter:03d}"
+                            st.session_state.polprodukty.at[0, "Stan"] -= pj
+                            dodaj_ruch("RW (Półprod.)", nr_knf_auto, "Rolka Jumbo (115cm x 13mb)", pj, "Auto-Planer")
+                            
+                            total_produced = {}
+                            for r in mrp_data["plan_rolek"]:
+                                for n, q in r.items():
+                                    total_produced[n] = total_produced.get(n, 0) + q
+                                    
+                            for nazwa_gotowego, total_qty in total_produced.items():
+                                idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_gotowego][0]
+                                st.session_state.produkty.at[idx, "Stan"] += total_qty
+                                dodaj_ruch("PW (Gotowe)", nr_knf_auto, nazwa_gotowego, total_qty, "Auto-Planer")
+                            
+                            pdf_knf = FPDF()
+                            pdf_knf.add_page()
+                            pdf_knf.add_font("Roboto", "", font_path)
+                            pdf_knf.add_font("Roboto", "B", font_bold_path)
+                            pdf_knf.set_fill_color(240, 240, 240)
+                            pdf_knf.set_font("Roboto", "B", 14)
+                            pdf_knf.cell(0, 12, f"KARTA ROZKROJU: {nr_knf_auto} (AUTO)", border=0, ln=1, align='C', fill=True)
+                            pdf_knf.set_font("Roboto", "", 10)
+                            pdf_knf.cell(0, 8, f"Pocięto Jumbo: {pj} szt.", ln=1)
+                            
+                            st.session_state.archiwum_konf_pdf.append({"id": nr_knf_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "jumbo_szt": pj, "pdf": bytes(pdf_knf.output())})
+                            st.session_state.konf_counter += 1
+
+                        # 3. AUTO OKLEJANIE
+                        if mrp_data["braki_okl"]:
+                            nr_okl_auto = f"PR-OKL/{data_dzis_str}/{st.session_state.okl_counter:03d}"
+                            
+                            pdf_okl = FPDF()
+                            pdf_okl.add_page()
+                            pdf_okl.add_font("Roboto", "", font_path)
+                            pdf_okl.add_font("Roboto", "B", font_bold_path)
+                            pdf_okl.set_fill_color(240, 240, 240)
+                            pdf_okl.set_font("Roboto", "B", 14)
+                            pdf_okl.cell(0, 12, f"KARTA STACJI OKLEJANIA: {nr_okl_auto} (AUTO)", border=0, ln=1, align='C', fill=True)
+                            pdf_okl.ln(5)
+                            pdf_okl.set_font("Roboto", "B", 10)
+                            
+                            for b in mrp_data["braki_okl"]:
+                                idx_nie = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == b["Z_czego"]][0]
+                                idx_okl = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == b["Wariant"]][0]
+                                
+                                st.session_state.produkty.at[idx_nie, "Stan"] -= b["Brak_szt"]
+                                st.session_state.produkty.at[idx_okl, "Stan"] += b["Brak_szt"]
+                                
+                                dodaj_ruch("RW", nr_okl_auto, b["Z_czego"], b["Brak_szt"], "Auto-Planer (Oklejanie)")
+                                dodaj_ruch("PW (Gotowe)", nr_okl_auto, b["Wariant"], b["Brak_szt"], "Auto-Planer (Oklejanie)")
+                                
+                                pdf_okl.cell(0, 8, f"Przetworzono: {b['Brak_szt']} szt. ({b['Z_czego']} -> {b['Wariant']})", ln=1)
+                            
+                            st.session_state.archiwum_okl_pdf.append({"id": nr_okl_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "opis": "Proces oklejania 1-Click", "pdf": bytes(pdf_okl.output())})
+                            st.session_state.okl_counter += 1
+
+                        st.session_state.auto_success = "Cały łańcuch produkcyjny (Wytłaczanie -> Rozkrój -> Oklejanie) zrealizowany automatycznie!"
                         st.rerun()
+                else:
+                    st.button("Zleć i Zrealizuj Automatycznie", disabled=True, use_container_width=True)
 
-                with col_akcja2:
-                    if gotowe_do_auto:
-                        if st.button("Zleć i Zrealizuj Automatycznie (Wszystkie 3 kroki)", type="primary", use_container_width=True):
-                            data_dzis_str = datetime.now().strftime("%Y/%m/%d")
-                            font_path, font_bold_path = pobierz_czcionki()
-                            
-                            # ---- 1. AUTO WYTŁACZANIE JUMBO ----
-                            if brakuje_jumbo > 0:
-                                nr_jmb_auto = f"PR-JMB/{data_dzis_str}/{st.session_state.jumbo_counter:03d}"
-                                st.session_state.polprodukty.at[0, "Stan"] += brakuje_jumbo
-                                dodaj_ruch("PW (Półprod.)", nr_jmb_auto, st.session_state.polprodukty.at[0, "Nazwa"], brakuje_jumbo, "Auto-Planer")
-                                
-                                for k_id, zuzycie in st.session_state.receptura_baza.items():
-                                    idx = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == k_id][0]
-                                    laczne_zuzycie = zuzycie * brakuje_jumbo
-                                    st.session_state.komponenty.at[idx, "Stan"] -= laczne_zuzycie
-                                    dodaj_ruch("RW", nr_jmb_auto, st.session_state.komponenty.at[idx, "Nazwa"], laczne_zuzycie, "Auto-Planer")
-                                
-                                pdf_jmb = FPDF()
-                                pdf_jmb.add_page()
-                                pdf_jmb.add_font("Roboto", "", font_path)
-                                pdf_jmb.add_font("Roboto", "B", font_bold_path)
-                                pdf_jmb.set_fill_color(240, 240, 240)
-                                pdf_jmb.set_font("Roboto", "B", 14)
-                                pdf_jmb.cell(0, 12, f"KARTA PRZEBIEGU PRODUKCJI JUMBO: {nr_jmb_auto} (AUTO)", border=0, ln=1, align='C', fill=True)
-                                pdf_jmb.set_font("Roboto", "", 10)
-                                pdf_jmb.cell(0, 8, f"Wyprodukowano automatycznie: {brakuje_jumbo} szt.", ln=1)
-                                
-                                st.session_state.archiwum_jumbo_pdf.append({"id": nr_jmb_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "ilosc": brakuje_jumbo, "pdf": bytes(pdf_jmb.output())})
-                                st.session_state.jumbo_counter += 1
-                                
-                            # ---- 2. AUTO ROZKRÓJ KONFEKCJONOWANIE ----
-                            if potrzeba_jumbo_calkowita > 0:
-                                nr_knf_auto = f"PR-KNF/{data_dzis_str}/{st.session_state.konf_counter:03d}"
-                                st.session_state.polprodukty.at[0, "Stan"] -= potrzeba_jumbo_calkowita
-                                dodaj_ruch("RW (Półprod.)", nr_knf_auto, "Rolka Jumbo (115cm x 13mb)", potrzeba_jumbo_calkowita, "Auto-Planer")
-                                
-                                total_produced = {}
-                                for r in plan_rolek:
-                                    for n, q in r.items():
-                                        total_produced[n] = total_produced.get(n, 0) + q
-                                        
-                                for nazwa_gotowego, total_qty in total_produced.items():
-                                    idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_gotowego][0]
-                                    st.session_state.produkty.at[idx, "Stan"] += total_qty
-                                    dodaj_ruch("PW (Gotowe)", nr_knf_auto, nazwa_gotowego, total_qty, "Auto-Planer")
-                                
-                                pdf_knf = FPDF()
-                                pdf_knf.add_page()
-                                pdf_knf.add_font("Roboto", "", font_path)
-                                pdf_knf.add_font("Roboto", "B", font_bold_path)
-                                pdf_knf.set_fill_color(240, 240, 240)
-                                pdf_knf.set_font("Roboto", "B", 14)
-                                pdf_knf.cell(0, 12, f"KARTA ROZKROJU: {nr_knf_auto} (AUTO)", border=0, ln=1, align='C', fill=True)
-                                pdf_knf.set_font("Roboto", "", 10)
-                                pdf_knf.cell(0, 8, f"Pocięto Jumbo: {potrzeba_jumbo_calkowita} szt.", ln=1)
-                                
-                                st.session_state.archiwum_konf_pdf.append({"id": nr_knf_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "jumbo_szt": potrzeba_jumbo_calkowita, "pdf": bytes(pdf_knf.output())})
-                                st.session_state.konf_counter += 1
+    # --- ZAKŁADKA 0.5: WYDRUK DLA HALI ---
+    with tab_wydruk:
+        st.subheader("Kompleksowy Plan dla Hali Produkcyjnej")
+        st.write("Wygeneruj jeden wspólny, czytelny dokument PDF dla operatorów maszyn, zawierający wytyczne dla całego procesu na dany dzień.")
+        
+        if not mrp_data or (not mrp_data["braki_okl"] and not mrp_data["braki_nie"]):
+            st.info("Brak zadań produkcyjnych do wygenerowania na karcie.")
+        else:
+            if st.button("Drukuj Kompleksowy Plan Produkcji (PDF)", use_container_width=True):
+                font_path, font_bold_path = pobierz_czcionki()
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.add_font("Roboto", "", font_path)
+                pdf.add_font("Roboto", "B", font_bold_path)
+                
+                pdf.set_fill_color(240, 240, 240)
+                pdf.set_font("Roboto", "B", 15)
+                pdf.cell(0, 12, "KOMPLEKSOWY PLAN PRODUKCJI ZLECEŃ", border=0, ln=1, align='C', fill=True)
+                
+                pdf.set_font("Roboto", "", 9)
+                pdf.cell(0, 6, f"Dokument wygenerowany: {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  Wydział Produkcji", border=0, ln=1, align='C')
+                pdf.ln(8)
+                
+                # SEKCJA 1
+                pdf.set_font("Roboto", "B", 12)
+                pdf.cell(0, 8, "KROK 1: WYTŁACZARKA GŁÓWNA (PRODUKCJA JUMBO)", border="B", ln=1)
+                pdf.set_font("Roboto", "", 10)
+                if mrp_data["brakuje_jumbo"] > 0:
+                    pdf.cell(0, 8, f"Do wyprodukowania: {mrp_data['brakuje_jumbo']} szt. rolek Jumbo (115cm x 13mb).", ln=1)
+                    pdf.set_font("Roboto", "B", 9)
+                    pdf.cell(0, 6, "Zlecenie wydania materiału z magazynu surowców:", ln=1)
+                    pdf.set_font("Roboto", "", 9)
+                    pdf.cell(0, 6, f" - Aluminium zbrojone 1,15m: {mrp_data['req_alu']:g} mb", ln=1)
+                    pdf.cell(0, 6, f" - Barwnik biały: {mrp_data['req_bia']:g} kg", ln=1)
+                    pdf.cell(0, 6, f" - Barwnik zielony: {mrp_data['req_zie']:g} kg", ln=1)
+                else:
+                    pdf.cell(0, 8, "Brak zaleceń. Wykorzystać zapas Jumbo z magazynu.", ln=1)
+                pdf.ln(5)
+                
+                # SEKCJA 2
+                pdf.set_font("Roboto", "B", 12)
+                pdf.cell(0, 8, "KROK 2: STACJA ROZKROJU (KONFEKCJA WZDŁUŻNA)", border="B", ln=1)
+                if mrp_data["potrzeba_jmb"] > 0:
+                    pdf.set_font("Roboto", "", 10)
+                    pdf.cell(0, 8, f"Pobrać z magazynu do cięcia: {mrp_data['potrzeba_jmb']} szt. rolek Jumbo.", ln=1)
+                    pdf.ln(2)
+                    for i, (_, dane) in enumerate(mrp_data["szablony"].items()):
+                        pdf.set_font("Roboto", "B", 10)
+                        pdf.set_fill_color(248, 248, 248)
+                        pdf.cell(0, 8, f" SZABLON NR {i+1} (Ciąć tak {dane['ile']} szt. rolek Jumbo)", border=1, ln=1, fill=True)
+                        pdf.set_font("Roboto", "", 9)
+                        for n, q in dane["wzor"].items():
+                            pdf.cell(10, 6, "-", align='R')
+                            pdf.cell(120, 6, n)
+                            pdf.cell(40, 6, f"Wyciąć: {q} szt.", ln=1)
+                        pdf.ln(3)
+                else:
+                    pdf.set_font("Roboto", "", 10)
+                    pdf.cell(0, 8, "Brak zaleceń dla cięcia.", ln=1)
+                pdf.ln(5)
+                
+                # SEKCJA 3
+                pdf.set_font("Roboto", "B", 12)
+                pdf.cell(0, 8, "KROK 3: STACJA OKLEJANIA", border="B", ln=1)
+                if mrp_data["braki_okl"]:
+                    pdf.set_font("Roboto", "", 10)
+                    pdf.cell(0, 8, "Pobrać po cięciu warianty NIEoklejone i przenieść na stację nakładania kleju:", ln=1)
+                    pdf.ln(2)
+                    pdf.set_font("Roboto", "B", 9)
+                    pdf.cell(100, 8, "Z wariantu bazowego (Nieokl.)", border=1)
+                    pdf.cell(50, 8, "Docelowo (Oklejony)", border=1)
+                    pdf.cell(30, 8, "Ilość", border=1, ln=1, align='C')
+                    pdf.set_font("Roboto", "", 9)
+                    for b in mrp_data["braki_okl"]:
+                        pdf.cell(100, 6, b["Z_czego"], border=1)
+                        pdf.cell(50, 6, b["Wariant"].split(" - ")[0], border=1)
+                        pdf.cell(30, 6, f"{b['Brak_szt']} szt.", border=1, ln=1, align='C')
+                else:
+                    pdf.set_font("Roboto", "", 10)
+                    pdf.cell(0, 8, "Brak zaleceń oklejania na tę zmianę.", ln=1)
+                
+                st.session_state.ostatni_raport_zk_pdf = bytes(pdf.output())
+                st.rerun()
 
-                            # ---- 3. AUTO OKLEJANIE ----
-                            if braki_do_oklejenia:
-                                nr_okl_auto = f"PR-OKL/{data_dzis_str}/{st.session_state.okl_counter:03d}"
-                                
-                                pdf_okl = FPDF()
-                                pdf_okl.add_page()
-                                pdf_okl.add_font("Roboto", "", font_path)
-                                pdf_okl.add_font("Roboto", "B", font_bold_path)
-                                pdf_okl.set_fill_color(240, 240, 240)
-                                pdf_okl.set_font("Roboto", "B", 14)
-                                pdf_okl.cell(0, 12, f"KARTA STACJI OKLEJANIA: {nr_okl_auto} (AUTO)", border=0, ln=1, align='C', fill=True)
-                                pdf_okl.ln(5)
-                                pdf_okl.set_font("Roboto", "B", 10)
-                                
-                                for b in braki_do_oklejenia:
-                                    idx_nie = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == b["Z_czego"]][0]
-                                    idx_okl = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == b["Wariant"]][0]
-                                    
-                                    st.session_state.produkty.at[idx_nie, "Stan"] -= b["Brak_szt"]
-                                    st.session_state.produkty.at[idx_okl, "Stan"] += b["Brak_szt"]
-                                    
-                                    dodaj_ruch("RW", nr_okl_auto, b["Z_czego"], b["Brak_szt"], "Auto-Planer (Oklejanie)")
-                                    dodaj_ruch("PW (Gotowe)", nr_okl_auto, b["Wariant"], b["Brak_szt"], "Auto-Planer (Oklejanie)")
-                                    
-                                    pdf_okl.cell(0, 8, f"Przetworzono: {b['Brak_szt']} szt. ({b['Z_czego']} -> {b['Wariant']})", ln=1)
-                                
-                                st.session_state.archiwum_okl_pdf.append({"id": nr_okl_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "opis": "Proces oklejania 1-Click", "pdf": bytes(pdf_okl.output())})
-                                st.session_state.okl_counter += 1
-
-                            st.session_state.auto_success = "Cały łańcuch produkcyjny (Wytłaczanie -> Rozkrój -> Oklejanie) zrealizowany automatycznie!"
-                            st.rerun()
-                    else:
-                        st.button("Zleć i Zrealizuj Automatycznie", disabled=True, use_container_width=True)
-
-    # --- KROK 1 ---
+    # --- KROK 1 (RĘCZNY) ---
     with tab1:
         st.subheader("Wytłaczanie Rolek Jumbo (115cm x 13mb) - RĘCZNIE")
         s_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
@@ -814,7 +844,7 @@ elif menu == "Moduł Production":
                     st.session_state.nazwa_pliku_produkcji = f"{nr_jmb_auto.replace('/', '_')}.pdf"
                     st.rerun()
 
-    # --- KROK 2 ---
+    # --- KROK 2 (RĘCZNY) ---
     with tab2:
         st.subheader("Konfekcja (Tworzenie Zlecenia Rozkroju) - RĘCZNIE")
         s_jumbo = int(st.session_state.polprodukty.at[0, "Stan"])
@@ -828,17 +858,15 @@ elif menu == "Moduł Production":
         elif jumbo_dostepne == 0 and not st.session_state.konf_koszyk:
             st.warning("Wszystkie dostępne rolki Jumbo zostały już przydzielone do poniższego zlecenia.")
         else:
-            st.write("**1. Zdefiniuj szablon cięcia dla POJEDYNCZEJ rolki:** (UWAGA: Rozkrój odbywa się TYLKO na warianty NIEOKLEJONE).")
+            st.write("**Zdefiniuj szablon cięcia dla POJEDYNCZEJ rolki:** (Max 6 rolek)")
             
             df_nieoklejone = st.session_state.produkty[st.session_state.produkty['Wariant'].str.contains("Nieoklejona")]
             
             rozkroj_temp = {}
-            c1, c2, c3 = st.columns(3)
-            cols = [c1, c2, c3]
-            for i, (idx, r) in enumerate(df_nieoklejone.iterrows()):
-                szerokosc_tylko = r['Wariant'].replace("GrizoThermo+ ", "").replace(" - Nieoklejona (13mb)", "")
-                with cols[i % 3]:
-                    rozkroj_temp[idx] = st.number_input(f"Szerokość {szerokosc_tylko}", min_value=0, value=0, key=f"r_temp_{idx}")
+            c_okl, c_nie = st.columns(2)
+            for idx, r in df_nieoklejone.iterrows():
+                with c_nie if "Nieoklejona" in r['Wariant'] else c_okl:
+                    rozkroj_temp[idx] = st.number_input(r['Wariant'], min_value=0, value=0, key=f"r_temp_{idx}")
                     
             zuzyte_cm = sum(rozkroj_temp[idx] * st.session_state.produkty.at[idx, 'Szerokosc'] for idx in rozkroj_temp)
             laczna_ilosc_rolek = sum(rozkroj_temp.values())
@@ -868,7 +896,7 @@ elif menu == "Moduł Production":
                             })
                             st.rerun()
             elif laczna_ilosc_rolek > 6:
-                st.error(f"Błąd techniczny: Szablon zawiera {laczna_ilosc_rolek} rolek. Maksymalna techniczna wydajność to 6 noży.")
+                st.error(f"Błąd techniczny: Szablon zawiera {laczna_ilosc_rolek} rolek. Maksymalna wydajność to 6 noży.")
             elif zuzyte_cm > 115:
                 st.error(f"Przekroczyłeś wymiar rolki bazowej o {zuzyte_cm - 115} cm!")
             elif zuzyte_cm > 0:
@@ -876,7 +904,7 @@ elif menu == "Moduł Production":
 
         if st.session_state.konf_koszyk:
             st.divider()
-            st.subheader("2. Podsumowanie Zlecenia Rozkroju")
+            st.subheader("Podsumowanie Zlecenia Rozkroju")
             
             df_k = pd.DataFrame([
                 {"Szablon (Rozkład na 1 rolce)": item["opis"], "Zadeklarowane rolki Jumbo (szt.)": item["ile_rolek"]}
@@ -981,7 +1009,7 @@ elif menu == "Moduł Production":
                     st.session_state.konf_koszyk = []
                     st.rerun()
 
-    # --- KROK 3 (NOWY) ---
+    # --- KROK 3 (RĘCZNY) ---
     with tab3:
         st.subheader("Oklejanie (Tworzenie wariantu 'Oklejona') - RĘCZNIE")
         st.write("Wybierz rolki Nieoklejone z magazynu i zewidencjuj proces nałożenia okleiny.")
@@ -1005,7 +1033,7 @@ elif menu == "Moduł Production":
                 ile_okleic = c_okl2.number_input("Ilość do oklejenia:", min_value=1, max_value=max_dost, value=1, step=1)
                 
                 st.divider()
-                if st.form_submit_button("Zaksięguj Oklejanie i Generuj PDF Krok 3"):
+                if st.form_submit_button("Zaksięguj Oklejanie i Generuj PDF"):
                     data_dzis_str = datetime.now().strftime("%Y/%m/%d")
                     nr_okl_auto = f"PR-OKL/{data_dzis_str}/{st.session_state.okl_counter:03d}"
                     
