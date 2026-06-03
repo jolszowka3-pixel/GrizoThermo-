@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V48)
+# 1. INICJALIZACJA BAZY (WERSJA V49 - KOSZYK ZK)
 # ==========================================
-if 'init_v48' not in st.session_state:
-    st.session_state.init_v48 = True
+if 'init_v49' not in st.session_state:
+    st.session_state.init_v49 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -96,11 +96,11 @@ if 'init_v48' not in st.session_state:
     ])
     
     st.session_state.archiwum_wz_pdf = []
-    # Usunięto tablice PDF dla poszczególnych procesów, zostawiamy tylko logi operacji
     st.session_state.log_jumbo = []
     st.session_state.log_konf = []
     st.session_state.log_okl = []
     
+    st.session_state.zk_koszyk = [] # Dodano koszyk dla Zamówień
     st.session_state.wz_koszyk = []
     st.session_state.konf_koszyk = []
     st.session_state.zamowienia = []
@@ -291,29 +291,49 @@ elif menu == "Zamówienia (ZK)":
             data_dzis_str = datetime.now().strftime("%Y/%m/%d")
             nr_zk_auto = f"ZK/{data_dzis_str}/{st.session_state.zk_counter:03d}"
             
-            with st.form("nowe_zk"):
-                col_zk1, col_zk2 = st.columns(2)
-                klient = col_zk1.selectbox("Klient zamawiający", odbiorcy)
-                uwagi = col_zk2.text_input("Uwagi do zamówienia")
+            # Formularz nagłówkowy
+            col_zk1, col_zk2 = st.columns(2)
+            klient = col_zk1.selectbox("Klient zamawiający", odbiorcy, key="zk_klient_sel")
+            uwagi = col_zk2.text_input("Uwagi do zamówienia", key="zk_uwagi_in")
+            
+            st.divider()
+            st.subheader("Dodaj produkty do zamówienia")
+            
+            lista_produktow = st.session_state.produkty["Wariant"].tolist()
+            
+            col_p1, col_p2, col_p3 = st.columns([3, 1, 1])
+            with col_p1:
+                wybrany_produkt = st.selectbox("Wybierz asortyment", lista_produktow, key="zk_prod_sel")
+            with col_p2:
+                ilosc = st.number_input("Ilość (szt.)", min_value=1, value=1, step=1, key="zk_ilosc_in")
+            with col_p3:
+                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("Dodaj do zamówienia", use_container_width=True):
+                    istnieje = False
+                    # Sprawdzenie czy produkt jest już w koszyku - jak tak to go sumujemy
+                    for item in st.session_state.zk_koszyk:
+                        if item["Wariant"] == wybrany_produkt:
+                            item["Ilość (szt.)"] += ilosc
+                            istnieje = True
+                            break
+                    if not istnieje:
+                        st.session_state.zk_koszyk.append({"Wariant": wybrany_produkt, "Ilość (szt.)": ilosc})
+                    st.rerun()
+
+            if st.session_state.zk_koszyk:
+                st.divider()
+                st.subheader("Koszyk Zamówienia")
+                df_koszyk = pd.DataFrame(st.session_state.zk_koszyk)
+                st.dataframe(df_koszyk, use_container_width=True, hide_index=True)
                 
-                st.write("Wprowadź ilości zamawianych produktów:")
-                df_zk = st.session_state.produkty[["Wariant"]].copy()
-                df_zk["Ilość (szt.)"] = 0
-                
-                zamawiane_dane = st.data_editor(
-                    df_zk, hide_index=True, use_container_width=True,
-                    column_config={
-                        "Wariant": st.column_config.TextColumn("Nazwa asortymentu", disabled=True),
-                        "Ilość (szt.)": st.column_config.NumberColumn("Zamawiana ilość", min_value=0, step=1)
-                    }
-                )
-                
-                if st.form_submit_button("Zarejestruj Zamówienie"):
-                    pozycje = zamawiane_dane[zamawiane_dane["Ilość (szt.)"] > 0]
-                    if pozycje.empty:
-                        st.error("Musisz zamówić przynajmniej 1 produkt.")
-                    else:
-                        szczegoly = pozycje.to_dict('records')
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("Wyczyść koszyk", use_container_width=True):
+                        st.session_state.zk_koszyk = []
+                        st.rerun()
+                with col_btn2:
+                    if st.button("Zatwierdź i zarejestruj ZK", type="primary", use_container_width=True):
+                        szczegoly = st.session_state.zk_koszyk.copy()
                         st.session_state.zamowienia.append({
                             "id": nr_zk_auto,
                             "data": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -323,6 +343,7 @@ elif menu == "Zamówienia (ZK)":
                             "Status": "Oczekujące"
                         })
                         st.session_state.zk_counter += 1
+                        st.session_state.zk_koszyk = []
                         st.success(f"Zamówienie {nr_zk_auto} zostało przyjęte w systemie.")
                         st.rerun()
 
