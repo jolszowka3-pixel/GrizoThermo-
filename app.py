@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V28)
+# 1. INICJALIZACJA BAZY
 # ==========================================
-if 'init_v28' not in st.session_state:
-    st.session_state.init_v28 = True
+if 'init_v29' not in st.session_state:
+    st.session_state.init_v29 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -96,6 +96,8 @@ if 'init_v28' not in st.session_state:
     st.session_state.archiwum_wz_pdf = []
     st.session_state.archiwum_jumbo_pdf = []
     st.session_state.archiwum_konf_pdf = []
+    st.session_state.wz_koszyk = []
+    st.session_state.konf_koszyk = []
 
 def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     uzytkownik = st.session_state.aktualny_uzytkownik if st.session_state.aktualny_uzytkownik else "System"
@@ -251,16 +253,17 @@ elif menu == "Stan Magazynu":
             st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {row["Stan"]:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
 # ==========================================
-# MODUŁ 3: PRODUKCJA (DWUETAPOWA Z RAPORTAMI PDF)
+# MODUŁ 3: PRODUKCJA
 # ==========================================
 elif menu == "Moduł Production":
     st.header("Zarządzanie Produkcją")
-    tab1, tab2 = st.tabs(["KROK 1: Maszyna Główna", "KROK 2: Konfekcja (Specyfikacja Rozkroju)"])
+    tab1, tab2 = st.tabs(["KROK 1: Maszyna Główna", "KROK 2: Konfekcja (Zlecenie Rozkroju)"])
     
+    # Powiadomienia o wygenerowanych PDF z logiki produkcyjnej
     if "ostatnia_produkcja_pdf" in st.session_state:
         st.success(f"Zaksięgowano pomyślnie raport: {st.session_state.nazwa_pliku_produkcji}")
         st.download_button(
-            label="Pobierz wygenerowaną kartę procesu / specyfikację (.pdf)",
+            label="Pobierz wygenerowaną kartę procesu / zlecenia (.pdf)",
             data=st.session_state.ostatnia_produkcja_pdf,
             file_name=st.session_state.nazwa_pliku_produkcji,
             mime="application/pdf",
@@ -268,6 +271,7 @@ elif menu == "Moduł Production":
         )
         st.divider()
     
+    # --- KROK 1 ---
     with tab1:
         st.subheader("Wytłaczanie Rolek Jumbo (115cm x 13mb)")
         s_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
@@ -356,37 +360,106 @@ elif menu == "Moduł Production":
         else:
             st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
 
+    # --- KROK 2 ---
     with tab2:
-        st.subheader("Planowanie Rozkroju i Specyfikacja dla Operatora")
+        st.subheader("Konfekcja (Tworzenie Zlecenia Rozkroju)")
         s_jumbo = int(st.session_state.polprodukty.at[0, "Stan"])
+        jumbo_w_koszyku = sum(item["ile_rolek"] for item in st.session_state.konf_koszyk)
+        jumbo_dostepne = s_jumbo - jumbo_w_koszyku
         
-        if s_jumbo > 0:
-            st.info(f"Dostępny zapas na magazynie: {s_jumbo} szt. rolek Jumbo (szerokość 115cm).")
+        st.info(f"Fizyczny stan na magazynie: {s_jumbo} szt. Jumbo. (Dostępne do zaplanowania: {jumbo_dostepne} szt.)")
+        
+        if s_jumbo == 0:
+            st.warning("Brak rolek Jumbo na magazynie. Wyprodukuj je w Kroku 1.")
+        elif jumbo_dostepne == 0 and not st.session_state.konf_koszyk:
+            st.warning("Brak dostępnych rolek Jumbo.")
+        else:
+            st.write("**1. Zdefiniuj szablon cięcia dla POJEDYNCZEJ rolki (Suma musi wynosić równo 115 cm):**")
             
-            ile_tniemy = st.number_input("Ilość rolek Jumbo do pocięcia według poniższego szablonu:", min_value=1, max_value=s_jumbo, value=1)
-            
-            st.write("Skonfiguruj SZABLON CIĘCIA DLA POJEDYNCZEJ ROLKI Jumbo. Suma szerokości musi wynosić równo 115 cm.")
             c_okl, c_nie = st.columns(2)
-            rozkroj_na_rolke = {}
+            rozkroj_temp = {}
             for idx, r in st.session_state.produkty.iterrows():
                 with c_nie if "Nieoklejona" in r['Wariant'] else c_okl:
-                    rozkroj_na_rolke[idx] = st.number_input(r['Wariant'], min_value=0, value=0, key=f"r_{idx}")
+                    rozkroj_temp[idx] = st.number_input(r['Wariant'], min_value=0, value=0, key=f"r_temp_{idx}")
                     
-            zuzyte_cm = sum(rozkroj_na_rolke[idx] * st.session_state.produkty.at[idx, 'Szerokosc'] for idx in rozkroj_na_rolke)
+            zuzyte_cm = sum(rozkroj_temp[idx] * st.session_state.produkty.at[idx, 'Szerokosc'] for idx in rozkroj_temp)
             
-            st.divider()
-            
+            st.write("")
             if zuzyte_cm == 115:
-                st.success(f"Szablon ułożony poprawnie. Suma szerokości: 115 cm. Brak odpadu na rolce.")
-                if st.button("Zatwierdź rozkrój i drukuj Specyfikację (PDF)"):
+                st.success("Szablon cięcia skonfigurowany prawidłowo (115 / 115 cm).")
+                
+                col_k1, col_k2 = st.columns([1, 2])
+                with col_k1:
+                    ile_tym_szablonem = st.number_input("Ile rolek Jumbo chcesz pociąć tym wzorem?", min_value=1, max_value=max(1, jumbo_dostepne), value=1)
+                
+                with col_k2:
+                    st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                    if st.button("Dodaj szablon do zlecenia produkcyjnego", use_container_width=True):
+                        if ile_tym_szablonem > jumbo_dostepne:
+                            st.error("Nie masz tyle wolnych rolek Jumbo na stanie!")
+                        else:
+                            parts = []
+                            for idx, qty in rozkroj_temp.items():
+                                if qty > 0:
+                                    szer = st.session_state.produkty.at[idx, 'Szerokosc']
+                                    typ = "Okl." if "Oklejona" in st.session_state.produkty.at[idx, 'Wariant'] else "Nieokl."
+                                    parts.append(f"{qty}x {szer}cm {typ}")
+                            opis_szablonu = " | ".join(parts)
+                            
+                            st.session_state.konf_koszyk.append({
+                                "szablon": rozkroj_temp.copy(),
+                                "ile_rolek": ile_tym_szablonem,
+                                "opis": opis_szablonu
+                            })
+                            st.rerun()
+            elif zuzyte_cm > 115:
+                st.error(f"Przekroczyłeś wymiar rolki bazowej o {zuzyte_cm - 115} cm!")
+            elif zuzyte_cm > 0:
+                st.warning(f"Suma szerokości: {zuzyte_cm} cm. Do zagospodarowania pozostało: {115 - zuzyte_cm} cm.")
+
+        # Wyświetlanie koszyka zleceń
+        if st.session_state.konf_koszyk:
+            st.divider()
+            st.subheader("2. Podsumowanie Zlecenia Rozkroju")
+            
+            df_k = pd.DataFrame([
+                {"Szablon (Rozkład na 1 rolce)": item["opis"], "Zadeklarowane rolki Jumbo (szt.)": item["ile_rolek"]}
+                for item in st.session_state.konf_koszyk
+            ])
+            st.dataframe(df_k, use_container_width=True, hide_index=True)
+            
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                if st.button("Wyczyść zlecenie i zacznij od nowa", use_container_width=True):
+                    st.session_state.konf_koszyk = []
+                    st.rerun()
+            with col_b2:
+                if st.button("Zatwierdź zlecenie i drukuj Specyfikację (PDF)", type="primary", use_container_width=True):
                     data_dzis_str = datetime.now().strftime("%Y/%m/%d")
                     nr_knf_auto = f"PR-KNF/{data_dzis_str}/{st.session_state.konf_counter:03d}"
+                    total_jumbo_to_cut = sum(item["ile_rolek"] for item in st.session_state.konf_koszyk)
                     
                     # 1. Zdejmujemy Jumbo z magazynu
-                    st.session_state.polprodukty.at[0, "Stan"] -= ile_tniemy
-                    dodaj_ruch("RW (Półprod.)", nr_knf_auto, "Rolka Jumbo (115cm x 13mb)", ile_tniemy, "Konfekcja")
+                    st.session_state.polprodukty.at[0, "Stan"] -= total_jumbo_to_cut
+                    dodaj_ruch("RW (Półprod.)", nr_knf_auto, "Rolka Jumbo (115cm x 13mb)", total_jumbo_to_cut, "Konfekcja")
                     
-                    # 2. Generowanie Specyfikacji PDF dla operatora
+                    # 2. Akumulacja wyprodukowanych rolek
+                    total_produced = {}
+                    for item in st.session_state.konf_koszyk:
+                        for idx, qty_per_roll in item["szablon"].items():
+                            if qty_per_roll > 0:
+                                produced_qty = qty_per_roll * item["ile_rolek"]
+                                if idx in total_produced:
+                                    total_produced[idx] += produced_qty
+                                else:
+                                    total_produced[idx] = produced_qty
+                                    
+                    # Dodajemy wyroby gotowe na stan magazynu
+                    for idx, total_qty in total_produced.items():
+                        st.session_state.produkty.at[idx, "Stan"] += total_qty
+                        dodaj_ruch("PW (Gotowe)", nr_knf_auto, st.session_state.produkty.at[idx, "Wariant"], total_qty, "Konfekcja")
+
+                    # 3. Generowanie PDF Zlecenia
                     font_path, font_bold_path = pobierz_czcionki()
                     pdf = FPDF()
                     pdf.add_page()
@@ -395,39 +468,37 @@ elif menu == "Moduł Production":
                     
                     pdf.set_fill_color(240, 240, 240)
                     pdf.set_font("Roboto", "B", 14)
-                    pdf.cell(0, 12, f"SPECYFIKACJA ROZKROJU NR: {nr_knf_auto}", border=0, ln=1, align='C', fill=True)
+                    pdf.cell(0, 12, f"KARTA ZLECENIA: ROZKRÓJ I KONFEKCJA NR {nr_knf_auto}", border=0, ln=1, align='C', fill=True)
                     
                     pdf.set_font("Roboto", "", 9)
                     pdf.cell(0, 6, f"Data operacji: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   |   Stanowisko: Stół rozkroju", border=0, ln=1, align='C')
                     pdf.ln(6)
                     
                     pdf.set_font("Roboto", "B", 11)
-                    pdf.cell(0, 6, "1. MATERIAŁ POBRANY DO ROZKROJU", border="B", ln=1)
+                    pdf.cell(0, 6, "1. MATERIAŁ ZBIORCZY POBRANY DO ROZKROJU", border="B", ln=1)
                     pdf.set_font("Roboto", "", 10)
-                    pdf.cell(0, 8, f"Rolka bazowa Jumbo (115cm x 13mb) - Do pocięcia łącznie: {ile_tniemy} szt.", ln=1)
+                    pdf.cell(0, 8, f"Rolka bazowa Jumbo (115cm x 13mb) - Łącznie do pocięcia: {total_jumbo_to_cut} szt.", ln=1)
                     pdf.ln(5)
                     
                     pdf.set_font("Roboto", "B", 11)
-                    pdf.cell(0, 6, "2. INSTRUKCJA CIĘCIA DLA 1 SZTUKI ROLKI JUMBO (115 CM)", border="B", ln=1)
+                    pdf.cell(0, 6, "2. INSTRUKCJA CIĘCIA (SZABLONY NA POJEDYNCZĄ ROLKĘ)", border="B", ln=1)
                     pdf.ln(2)
-                    pdf.set_font("Roboto", "B", 9)
-                    pdf.cell(15, 8, "Lp.", border=1, align='C')
-                    pdf.cell(125, 8, "Wymiar i specyfikacja pasa", border=1, align='L')
-                    pdf.cell(40, 8, "Ilość cięć z 1 rolki", border=1, align='C', ln=1)
-                    pdf.set_font("Roboto", "", 9)
                     
-                    lp_k = 1
-                    for idx, ilosc_w_jednej in rozkroj_na_rolke.items():
-                        if ilosc_w_jednej > 0:
-                            wariant_nazwa = st.session_state.produkty.at[idx, "Wariant"]
-                            pdf.cell(15, 8, str(lp_k), border=1, align='C')
-                            pdf.cell(125, 8, wariant_nazwa, border=1, align='L')
-                            pdf.cell(40, 8, f"{ilosc_w_jednej} szt.", border=1, align='C', ln=1)
-                            lp_k += 1
-                            
-                    pdf.ln(5)
+                    for i, item in enumerate(st.session_state.konf_koszyk):
+                        pdf.set_font("Roboto", "B", 10)
+                        pdf.set_fill_color(248, 248, 248)
+                        pdf.cell(0, 8, f" SZABLON NR {i+1} (Użyć dla {item['ile_rolek']} szt. rolek Jumbo)", border=1, ln=1, fill=True)
+                        pdf.set_font("Roboto", "", 9)
+                        for idx, qty_per_roll in item["szablon"].items():
+                            if qty_per_roll > 0:
+                                pdf.cell(10, 6, "-", align='R')
+                                pdf.cell(120, 6, st.session_state.produkty.at[idx, "Wariant"])
+                                pdf.cell(40, 6, f"Wytnij: {qty_per_roll} szt.", ln=1)
+                        pdf.ln(3)
+                    
+                    pdf.ln(2)
                     pdf.set_font("Roboto", "B", 11)
-                    pdf.cell(0, 6, f"3. OCZEKIWANY WYNIK CAŁKOWITY (PO POCIĘCIU {ile_tniemy} ROLI)", border="B", ln=1)
+                    pdf.cell(0, 6, "3. ZBIORCZE ROZLICZENIE PRODUKTÓW GOTOWYCH", border="B", ln=1)
                     pdf.ln(2)
                     pdf.set_font("Roboto", "B", 9)
                     pdf.cell(15, 8, "Lp.", border=1, align='C')
@@ -435,40 +506,28 @@ elif menu == "Moduł Production":
                     pdf.cell(40, 8, "Łącznie do oddania", border=1, align='C', ln=1)
                     pdf.set_font("Roboto", "", 9)
                     
-                    lp_k2 = 1
-                    for idx, ilosc_w_jednej in rozkroj_na_rolke.items():
-                        if ilosc_w_jednej > 0:
-                            wariant_nazwa = st.session_state.produkty.at[idx, "Wariant"]
-                            ilosc_laczna = ilosc_w_jednej * ile_tniemy
-                            
-                            # 3. Zaksięgowanie gotowych produktów na stan
-                            st.session_state.produkty.at[idx, "Stan"] += ilosc_laczna
-                            dodaj_ruch("PW (Gotowe)", nr_knf_auto, wariant_nazwa, ilosc_laczna, "Konfekcja")
-                            
-                            pdf.cell(15, 8, str(lp_k2), border=1, align='C')
-                            pdf.cell(125, 8, wariant_nazwa, border=1, align='L')
-                            pdf.cell(40, 8, f"{ilosc_laczna} szt.", border=1, align='C', ln=1)
-                            lp_k2 += 1
+                    lp_k = 1
+                    for idx, total_qty in total_produced.items():
+                        wariant_nazwa = st.session_state.produkty.at[idx, "Wariant"]
+                        pdf.cell(15, 8, str(lp_k), border=1, align='C')
+                        pdf.cell(125, 8, wariant_nazwa, border=1, align='L')
+                        pdf.cell(40, 8, f"{total_qty} szt.", border=1, align='C', ln=1)
+                        lp_k += 1
                             
                     pdf.ln(25)
                     pdf.cell(95, 5, "..........................................................", align='C')
                     pdf.cell(95, 5, "..........................................................", align='C', ln=1)
-                    pdf.cell(95, 5, "Konfekcjoner (Odebrał)", align='C')
-                    pdf.cell(95, 5, "Kierownik Zmiany", align='C', ln=1)
+                    pdf.cell(95, 5, "Konfekcjoner (Odebrał instruktarz)", align='C')
+                    pdf.cell(95, 5, "Kierownik Produkcji (Zlecił)", align='C', ln=1)
                     
                     pdf_bytes = bytes(pdf.output())
-                    st.session_state.archiwum_konf_pdf.append({"id": nr_knf_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "jumbo_szt": ile_tniemy, "pdf": pdf_bytes})
+                    st.session_state.archiwum_konf_pdf.append({"id": nr_knf_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "jumbo_szt": total_jumbo_to_cut, "pdf": pdf_bytes})
                     
                     st.session_state.konf_counter += 1
                     st.session_state.ostatnia_produkcja_pdf = pdf_bytes
                     st.session_state.nazwa_pliku_produkcji = f"{nr_knf_auto.replace('/', '_')}.pdf"
+                    st.session_state.konf_koszyk = []
                     st.rerun()
-            elif zuzyte_cm < 115:
-                st.warning(f"Suma szerokości to {zuzyte_cm} cm. Zagospodaruj pozostałe {115 - zuzyte_cm} cm.")
-            else:
-                st.error(f"Suma szerokości wynosi {zuzyte_cm} cm. Przekroczono wymiar rolki bazowej o {zuzyte_cm - 115} cm!")
-        else:
-            st.warning("Brak rolek Jumbo na magazynie. Wyprodukuj je w Kroku 1.")
 
 elif menu == "Baza Kontrahentów (CRM)":
     st.header("Baza Kontrahentów")
@@ -553,9 +612,6 @@ elif menu == "Przyjęcie Towaru (PZ)":
 elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
-    
-    if "wz_koszyk" not in st.session_state:
-        st.session_state.wz_koszyk = []
     
     if "wygenerowane_pdf" in st.session_state:
         st.success(f"Zaksięgowano dokument: {st.session_state.nazwa_pliku_wz}")
