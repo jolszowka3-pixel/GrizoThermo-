@@ -16,7 +16,7 @@ st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
 # ==========================================
 # KONFIGURACJA BAZY DANYCH (GOOGLE SHEETS)
 # ==========================================
-ID_ARKUSZA_GOOGLE = "TUTAJ_WKLEJ_SWOJE_ID_ARKUSZA" # <-- Podmień na własne ID
+ID_ARKUSZA_GOOGLE = "https://docs.google.com/spreadsheets/d/1kmiEb4jaUSmZSsqsi6L3lBnxGWor_5RJD4ePpENoSNY/edit?gid=241587147#gid=241587147" # <-- Podmień na własne ID
 
 def podlacz_google_sheets():
     try:
