@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V39 - CZYSZCZENIE RAM)
+# 1. INICJALIZACJA BAZY (WERSJA V40)
 # ==========================================
-if 'init_v39' not in st.session_state:
-    st.session_state.init_v39 = True
+if 'init_v40' not in st.session_state:
+    st.session_state.init_v40 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -384,7 +384,7 @@ elif menu == "Moduł Production":
     st.header("Zarządzanie Produkcją i Planowanie")
     
     # ----------------------------------------------------
-    # GŁÓWNY SILNIK KALKULACYJNY MRP (DZIAŁA W TLE DLA ZAKŁADEK)
+    # GŁÓWNY SILNIK KALKULACYJNY MRP
     # ----------------------------------------------------
     oczekujace = [z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"]
     mrp_data = None
@@ -423,7 +423,6 @@ elif menu == "Moduł Production":
             if do_wyciecia_łącznie > 0:
                 braki_do_rozkroju.append({"Wariant": war_nie, "Brak_szt": int(do_wyciecia_łącznie), "Szerokosc": int(szer)})
         
-        # Algorytm pakowania - Strict 115cm i max 6 elementów
         items_to_pack = []
         for b in braki_do_rozkroju:
             items_to_pack.extend([(b["Wariant"], b["Szerokosc"])] * b["Brak_szt"])
@@ -542,7 +541,7 @@ elif menu == "Moduł Production":
         st.divider()
     
     # ----------------------------------------------------
-    # NOWY PODZIAŁ ZAKŁADEK (WYDRUK WYDZIELONY)
+    # ZAKŁADKI PRODUKCJI
     # ----------------------------------------------------
     tab_plan, tab_wydruk, tab1, tab2, tab3 = st.tabs(["Panel MRP (Analiza)", "Wydruk Planu dla Hali", "Krok 1: Wytłaczanie", "Krok 2: Rozkrój", "Krok 3: Oklejanie"])
     
@@ -1205,18 +1204,27 @@ elif menu == "Wydanie Towaru (WZ)":
     if not odbiorcy:
         st.warning("Brak odbiorców w bazie danych CRM.")
     else:
+        st.subheader("1. Realizacja Zamówienia (Opcjonalne wczytanie z ZK)")
         oczekujace_zk = [z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"]
         if oczekujace_zk:
-            with st.expander("INICJALIZACJA Z ZAMÓWIENIA KLIENTA (Wczytaj z ZK)", expanded=False):
-                opcje_zk = {f"{z['id']} | Kontrahent: {z['klient']}": z for z in oczekujace_zk}
-                wybrane_zk_klucz = st.selectbox("Wybierz oczekujące zamówienie", list(opcje_zk.keys()))
-                if st.button("Załaduj zamówienie do przygotowania WZ", use_container_width=True):
-                    z = opcje_zk[wybrane_zk_klucz]
-                    st.session_state.wybrany_klient_wz = z["klient"]
-                    st.session_state.powiazane_zk = z["id"]
-                    st.session_state.wz_koszyk = [{"Wariant": p["Wariant"], "Ilosc": p["Ilość (szt.)"]} for p in z["pozycje"]]
-                    st.rerun()
-                    
+            opcje_zk = {f"{z['id']} | Kontrahent: {z['klient']}": z for z in oczekujace_zk}
+            col_zk1, col_zk2 = st.columns([3, 1])
+            with col_zk1:
+                wybrane_zk_klucz = st.selectbox("Wybierz oczekujące zamówienie z listy", ["-- Wybierz (lub pomiń dla wydania ręcznego) --"] + list(opcje_zk.keys()))
+            with col_zk2:
+                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("Załaduj zamówienie na WZ", use_container_width=True):
+                    if wybrane_zk_klucz != "-- Wybierz (lub pomiń dla wydania ręcznego) --":
+                        z = opcje_zk[wybrane_zk_klucz]
+                        st.session_state.wybrany_klient_wz = z["klient"]
+                        st.session_state.powiazane_zk = z["id"]
+                        st.session_state.wz_koszyk = [{"Wariant": p["Wariant"], "Ilosc": p["Ilość (szt.)"]} for p in z["pozycje"]]
+                        st.rerun()
+        else:
+            st.info("Brak oczekujących zamówień w systemie. Możesz wystawić WZ ręcznie.")
+            
+        st.divider()
+        
         dostepne_produkty = st.session_state.produkty[st.session_state.produkty["Stan"] > 0].copy()
         
         if dostepne_produkty.empty and not st.session_state.wz_koszyk:
@@ -1225,9 +1233,9 @@ elif menu == "Wydanie Towaru (WZ)":
             data_dzis_str = datetime.now().strftime("%Y/%m/%d")
             nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
             
-            st.subheader("1. Dane Odbiorcy i Dokumentu")
+            st.subheader("2. Dane Odbiorcy i Dokumentu")
             if st.session_state.powiazane_zk:
-                st.info(f"Dokument powiązany z zamówieniem: {st.session_state.powiazane_zk}. Zostanie ono automatycznie zamknięte po wygenerowaniu dokumentu WZ.")
+                st.success(f"Aktywne powiązanie: Wydanie realizuje zamówienie {st.session_state.powiazane_zk}. Zostanie ono zamknięte po wygenerowaniu WZ.")
             
             col_f1, col_f2 = st.columns(2)
             with col_f1:
@@ -1238,7 +1246,7 @@ elif menu == "Wydanie Towaru (WZ)":
                 uwagi_doc = st.text_input("Uwagi do dokumentu", value="Dostawa z magazynu głównego.")
                 
             st.divider()
-            st.subheader("2. Dodaj produkty do wydania")
+            st.subheader("3. Dodaj produkty do wydania")
             
             opcje_list = []
             opcje_map = {}
@@ -1278,7 +1286,7 @@ elif menu == "Wydanie Towaru (WZ)":
 
             if st.session_state.wz_koszyk:
                 st.divider()
-                st.subheader("3. Podsumowanie dokumentu WZ")
+                st.subheader("4. Podsumowanie dokumentu WZ")
                 
                 df_koszyk = pd.DataFrame(st.session_state.wz_koszyk)
                 df_koszyk.columns = ["Nazwa asortymentu", "Ilość do wydania (szt.)"]
@@ -1313,6 +1321,11 @@ elif menu == "Wydanie Towaru (WZ)":
                             pdf.set_fill_color(240, 240, 240)
                             pdf.set_font("Roboto", "B", 15)
                             pdf.cell(0, 12, f"WYDANIE ZEWNĘTRZNE (WZ) NR {nr_wz_auto}", border=0, ln=1, align='C', fill=True)
+                            
+                            # Adnotacja o zamówieniu klienta na PDF
+                            if st.session_state.powiazane_zk:
+                                pdf.set_font("Roboto", "I", 11)
+                                pdf.cell(0, 8, f"Dotyczy zamówienia nr: {st.session_state.powiazane_zk}", border=0, ln=1, align='C')
                             
                             pdf.set_font("Roboto", "", 9)
                             pdf.set_text_color(100, 100, 100)
@@ -1369,6 +1382,8 @@ elif menu == "Wydanie Towaru (WZ)":
                             
                             st.session_state.wz_counter += 1
                             
+                            powiazanie_info = st.session_state.powiazane_zk if st.session_state.powiazane_zk else "-"
+                            
                             if st.session_state.powiazane_zk:
                                 for zmw in st.session_state.zamowienia:
                                     if zmw["id"] == st.session_state.powiazane_zk:
@@ -1397,7 +1412,7 @@ elif menu == "Wydanie Towaru (WZ)":
                             pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
                             
                             pdf_bytes = bytes(pdf.output())
-                            st.session_state.archiwum_wz_pdf.append({"id": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "kontrahent": wybrany_klient, "pdf": pdf_bytes})
+                            st.session_state.archiwum_wz_pdf.append({"id": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "kontrahent": wybrany_klient, "zamowienie": powiazanie_info, "pdf": pdf_bytes})
                             
                             st.session_state.wygenerowane_pdf = pdf_bytes
                             st.session_state.nazwa_pliku_wz = f"{nr_wz_auto.replace('/', '_')}.pdf"
@@ -1420,8 +1435,8 @@ elif menu == "Archiwum Dokumentów":
         if not st.session_state.archiwum_wz_pdf:
             st.info("Brak wystawionych dokumentów WZ w bazie danych.")
         else:
-            df_wz = pd.DataFrame(st.session_state.archiwum_wz_pdf)[["id", "data", "kontrahent"]]
-            st.dataframe(df_wz, use_container_width=True, hide_index=True, column_config={"id":"Numer dokumentu", "data":"Data wystawienia", "kontrahent":"Odbiorca"})
+            df_wz = pd.DataFrame(st.session_state.archiwum_wz_pdf)[["id", "data", "kontrahent", "zamowienie"]]
+            st.dataframe(df_wz, use_container_width=True, hide_index=True, column_config={"id":"Numer dokumentu", "data":"Data wystawienia", "kontrahent":"Odbiorca", "zamowienie": "Dotyczy ZK"})
             
             lista_wz_id = [item["id"] for item in st.session_state.archiwum_wz_pdf]
             wybrane_wz_id = st.selectbox("Wybierz numer WZ do pobrania pliku PDF", lista_wz_id, key="sel_wz")
