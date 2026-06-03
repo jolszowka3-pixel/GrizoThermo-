@@ -112,7 +112,7 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-# CSS
+# CSS Corporate Style
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
@@ -256,7 +256,7 @@ elif menu == "Stan Magazynu":
             st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {row["Stan"]:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
 # ==========================================
-# MODUŁ ZAMÓWIENIA (ZK) 
+# MODUŁ ZAMÓWIENIA (ZK)
 # ==========================================
 elif menu == "Zamówienia (ZK)":
     st.header("Zamówienia Klientów (ZK)")
@@ -401,7 +401,7 @@ elif menu == "Moduł Production":
     
     tab_plan, tab1, tab2 = st.tabs(["Planowanie Zapotrzebowania", "KROK 1: Maszyna Główna", "KROK 2: Konfekcja (Zlecenie)"])
     
-    # --- PLANOWANIE Z ZAMÓWIEŃ Z INTEGRACJĄ STANÓW JUMBO ---
+    # --- KROK 0: PLANOWANIE Z ZAMÓWIEŃ Z INTEGRACJĄ STANÓW JUMBO ---
     with tab_plan:
         st.subheader("Analiza Zapotrzebowania i Auto-Planer Cięcia")
         st.write("System analizuje wszystkie oczekujące zamówienia, oblicza braki asortymentu i optymalizuje plan rozkroju wraz z wymogami dla maszyny głównej.")
@@ -437,35 +437,44 @@ elif menu == "Moduł Production":
                 
                 items_to_pack.sort(key=lambda x: x[1], reverse=True)
                 
+                # Inteligentny algorytm pakowania - Strict 115cm i max 6 elementów
+                def is_valid_partial(used_cm, count):
+                    rem = 115 - used_cm
+                    c = 6 - count
+                    if rem == 0: return True
+                    if rem < 0: return False
+                    if c == 0: return False
+                    if rem == 5: return False
+                    if rem > 35 * c: return False
+                    return True
+
                 plan_rolek = []
                 while items_to_pack:
                     rolka = {}
                     used_cm = 0
-                    roll_count = 0
+                    count = 0
                     i = 0
                     while i < len(items_to_pack):
                         nazwa, szer = items_to_pack[i]
-                        if roll_count + 1 <= 6 and used_cm + szer <= 115 and (115 - (used_cm + szer) != 5 or used_cm + szer == 115):
+                        if is_valid_partial(used_cm + szer, count + 1):
                             rolka[nazwa] = rolka.get(nazwa, 0) + 1
                             used_cm += szer
-                            roll_count += 1
+                            count += 1
                             items_to_pack.pop(i)
+                            if used_cm == 115 or count == 6:
+                                break
                         else:
                             i += 1
                             
-                    rem = 115 - used_cm
-                    while rem > 0 and roll_count < 6:
-                        # Inteligentne dopełnianie odpadu większymi wymiarami
-                        if roll_count == 5:
-                            if rem in [10, 15, 20, 25, 30, 35]: pad_w = rem
-                            else: pad_w = 35 if rem >= 35 else (30 if rem>=30 else (25 if rem>=25 else (20 if rem>=20 else (15 if rem>=15 else 10))))
-                        else:
-                            pad_w = 35 if rem >= 35 else (30 if rem>=30 else (25 if rem>=25 else (20 if rem>=20 else (15 if rem>=15 else 10))))
-                        
-                        pad_nazwa = f"GrizoThermo+ {pad_w}cm - Nieoklejona (13mb)"
-                        rolka[pad_nazwa] = rolka.get(pad_nazwa, 0) + 1
-                        rem -= pad_w
-                        roll_count += 1
+                    # Wypełnianie brakującej szerokości do pełnych 115 cm
+                    while used_cm < 115:
+                        for pw in [35, 30, 25, 20, 15, 10]:
+                            if is_valid_partial(used_cm + pw, count + 1):
+                                pad_nazwa = f"GrizoThermo+ {pw}cm - Nieoklejona (13mb)"
+                                rolka[pad_nazwa] = rolka.get(pad_nazwa, 0) + 1
+                                used_cm += pw
+                                count += 1
+                                break
                         
                     plan_rolek.append(rolka)
                 
