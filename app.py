@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V27)
+# 1. INICJALIZACJA BAZY (WERSJA V28)
 # ==========================================
-if 'init_v27' not in st.session_state:
-    st.session_state.init_v27 = True
+if 'init_v28' not in st.session_state:
+    st.session_state.init_v28 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -251,16 +251,16 @@ elif menu == "Stan Magazynu":
             st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {row["Stan"]:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
 # ==========================================
-# MODUŁ 3: PRODUKCJA
+# MODUŁ 3: PRODUKCJA (DWUETAPOWA Z RAPORTAMI PDF)
 # ==========================================
 elif menu == "Moduł Production":
     st.header("Zarządzanie Produkcją")
-    tab1, tab2 = st.tabs(["KROK 1: Maszyna Główna", "KROK 2: Konfekcja"])
+    tab1, tab2 = st.tabs(["KROK 1: Maszyna Główna", "KROK 2: Konfekcja (Specyfikacja Rozkroju)"])
     
     if "ostatnia_produkcja_pdf" in st.session_state:
         st.success(f"Zaksięgowano pomyślnie raport: {st.session_state.nazwa_pliku_produkcji}")
         st.download_button(
-            label="Pobierz wygenerowaną kartę procesu (.pdf)",
+            label="Pobierz wygenerowaną kartę procesu / specyfikację (.pdf)",
             data=st.session_state.ostatnia_produkcja_pdf,
             file_name=st.session_state.nazwa_pliku_produkcji,
             mime="application/pdf",
@@ -357,34 +357,36 @@ elif menu == "Moduł Production":
             st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
 
     with tab2:
-        st.subheader("Konfekcja (Rozkrój bez odpadu)")
+        st.subheader("Planowanie Rozkroju i Specyfikacja dla Operatora")
         s_jumbo = int(st.session_state.polprodukty.at[0, "Stan"])
         
         if s_jumbo > 0:
-            st.info(f"Dostępny zapas do cięcia: {s_jumbo} szt. rolek Jumbo.")
-            ile_tniemy = st.number_input("Ile rolek Jumbo bierzesz do cięcia z magazynu?", min_value=1, max_value=s_jumbo, value=1)
-            wymagane_cm = ile_tniemy * 115
-            st.markdown(f"Pocięcie {ile_tniemy} szt. Jumbo daje łącznie **{wymagane_cm} cm** szerokości.")
+            st.info(f"Dostępny zapas na magazynie: {s_jumbo} szt. rolek Jumbo (szerokość 115cm).")
             
+            ile_tniemy = st.number_input("Ilość rolek Jumbo do pocięcia według poniższego szablonu:", min_value=1, max_value=s_jumbo, value=1)
+            
+            st.write("Skonfiguruj SZABLON CIĘCIA DLA POJEDYNCZEJ ROLKI Jumbo. Suma szerokości musi wynosić równo 115 cm.")
             c_okl, c_nie = st.columns(2)
-            rozkroj = {}
+            rozkroj_na_rolke = {}
             for idx, r in st.session_state.produkty.iterrows():
                 with c_nie if "Nieoklejona" in r['Wariant'] else c_okl:
-                    rozkroj[idx] = st.number_input(r['Wariant'], min_value=0, value=0, key=f"r_{idx}")
+                    rozkroj_na_rolke[idx] = st.number_input(r['Wariant'], min_value=0, value=0, key=f"r_{idx}")
                     
-            zuzyte_cm = sum(rozkroj[idx] * st.session_state.produkty.at[idx, 'Szerokosc'] for idx in rozkroj)
+            zuzyte_cm = sum(rozkroj_na_rolke[idx] * st.session_state.produkty.at[idx, 'Szerokosc'] for idx in rozkroj_na_rolke)
             
             st.divider()
             
-            if zuzyte_cm == wymagane_cm:
-                st.success(f"Suma szerokości wynosi {zuzyte_cm} cm. Rozkrój idealny.")
-                if st.button("Zatwierdź rozkrój i zaktualizuj magazyny"):
+            if zuzyte_cm == 115:
+                st.success(f"Szablon ułożony poprawnie. Suma szerokości: 115 cm. Brak odpadu na rolce.")
+                if st.button("Zatwierdź rozkrój i drukuj Specyfikację (PDF)"):
                     data_dzis_str = datetime.now().strftime("%Y/%m/%d")
                     nr_knf_auto = f"PR-KNF/{data_dzis_str}/{st.session_state.konf_counter:03d}"
                     
+                    # 1. Zdejmujemy Jumbo z magazynu
                     st.session_state.polprodukty.at[0, "Stan"] -= ile_tniemy
                     dodaj_ruch("RW (Półprod.)", nr_knf_auto, "Rolka Jumbo (115cm x 13mb)", ile_tniemy, "Konfekcja")
                     
+                    # 2. Generowanie Specyfikacji PDF dla operatora
                     font_path, font_bold_path = pobierz_czcionki()
                     pdf = FPDF()
                     pdf.add_page()
@@ -393,44 +395,66 @@ elif menu == "Moduł Production":
                     
                     pdf.set_fill_color(240, 240, 240)
                     pdf.set_font("Roboto", "B", 14)
-                    pdf.cell(0, 12, f"KARTA ROZKROJU I KONFEKCJI: {nr_knf_auto}", border=0, ln=1, align='C', fill=True)
+                    pdf.cell(0, 12, f"SPECYFIKACJA ROZKROJU NR: {nr_knf_auto}", border=0, ln=1, align='C', fill=True)
                     
                     pdf.set_font("Roboto", "", 9)
-                    pdf.cell(0, 6, f"Data operacji: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   |   Główny stół rozkroju", border=0, ln=1, align='C')
+                    pdf.cell(0, 6, f"Data operacji: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   |   Stanowisko: Stół rozkroju", border=0, ln=1, align='C')
                     pdf.ln(6)
                     
                     pdf.set_font("Roboto", "B", 11)
-                    pdf.cell(0, 6, "1. POBRANY MATERIAŁ WEJŚCIOWY", border="B", ln=1)
+                    pdf.cell(0, 6, "1. MATERIAŁ POBRANY DO ROZKROJU", border="B", ln=1)
                     pdf.set_font("Roboto", "", 10)
-                    pdf.cell(0, 8, f"Pobrano z magazynu: Rolka Jumbo (115cm x 13mb) - Ilość: {ile_tniemy} szt. (Łącznie: {wymagane_cm} cm)", ln=1)
+                    pdf.cell(0, 8, f"Rolka bazowa Jumbo (115cm x 13mb) - Do pocięcia łącznie: {ile_tniemy} szt.", ln=1)
                     pdf.ln(5)
                     
                     pdf.set_font("Roboto", "B", 11)
-                    pdf.cell(0, 6, "2. REJESTR SKONFEKCJONOWANYCH PRODUKTÓW GOTOWYCH", border="B", ln=1)
+                    pdf.cell(0, 6, "2. INSTRUKCJA CIĘCIA DLA 1 SZTUKI ROLKI JUMBO (115 CM)", border="B", ln=1)
                     pdf.ln(2)
                     pdf.set_font("Roboto", "B", 9)
                     pdf.cell(15, 8, "Lp.", border=1, align='C')
-                    pdf.cell(125, 8, "Wariant gotowy (Szerokość / Wykończenie)", border=1, align='L')
-                    pdf.cell(40, 8, "Ilość uzyskana", border=1, align='C', ln=1)
+                    pdf.cell(125, 8, "Wymiar i specyfikacja pasa", border=1, align='L')
+                    pdf.cell(40, 8, "Ilość cięć z 1 rolki", border=1, align='C', ln=1)
                     pdf.set_font("Roboto", "", 9)
                     
                     lp_k = 1
-                    for idx, ilosc in rozkroj.items():
-                        if ilosc > 0:
-                            st.session_state.produkty.at[idx, "Stan"] += ilosc
+                    for idx, ilosc_w_jednej in rozkroj_na_rolke.items():
+                        if ilosc_w_jednej > 0:
                             wariant_nazwa = st.session_state.produkty.at[idx, "Wariant"]
-                            dodaj_ruch("PW (Gotowe)", nr_knf_auto, wariant_nazwa, ilosc, "Konfekcja")
-                            
                             pdf.cell(15, 8, str(lp_k), border=1, align='C')
                             pdf.cell(125, 8, wariant_nazwa, border=1, align='L')
-                            pdf.cell(40, 8, f"{ilosc} szt.", border=1, align='C', ln=1)
+                            pdf.cell(40, 8, f"{ilosc_w_jednej} szt.", border=1, align='C', ln=1)
                             lp_k += 1
+                            
+                    pdf.ln(5)
+                    pdf.set_font("Roboto", "B", 11)
+                    pdf.cell(0, 6, f"3. OCZEKIWANY WYNIK CAŁKOWITY (PO POCIĘCIU {ile_tniemy} ROLI)", border="B", ln=1)
+                    pdf.ln(2)
+                    pdf.set_font("Roboto", "B", 9)
+                    pdf.cell(15, 8, "Lp.", border=1, align='C')
+                    pdf.cell(125, 8, "Wariant asortymentu gotowego", border=1, align='L')
+                    pdf.cell(40, 8, "Łącznie do oddania", border=1, align='C', ln=1)
+                    pdf.set_font("Roboto", "", 9)
+                    
+                    lp_k2 = 1
+                    for idx, ilosc_w_jednej in rozkroj_na_rolke.items():
+                        if ilosc_w_jednej > 0:
+                            wariant_nazwa = st.session_state.produkty.at[idx, "Wariant"]
+                            ilosc_laczna = ilosc_w_jednej * ile_tniemy
+                            
+                            # 3. Zaksięgowanie gotowych produktów na stan
+                            st.session_state.produkty.at[idx, "Stan"] += ilosc_laczna
+                            dodaj_ruch("PW (Gotowe)", nr_knf_auto, wariant_nazwa, ilosc_laczna, "Konfekcja")
+                            
+                            pdf.cell(15, 8, str(lp_k2), border=1, align='C')
+                            pdf.cell(125, 8, wariant_nazwa, border=1, align='L')
+                            pdf.cell(40, 8, f"{ilosc_laczna} szt.", border=1, align='C', ln=1)
+                            lp_k2 += 1
                             
                     pdf.ln(25)
                     pdf.cell(95, 5, "..........................................................", align='C')
                     pdf.cell(95, 5, "..........................................................", align='C', ln=1)
-                    pdf.cell(95, 5, "Konfekcjoner (Podpis)", align='C')
-                    pdf.cell(95, 5, "Magazynier przyjmujący", align='C', ln=1)
+                    pdf.cell(95, 5, "Konfekcjoner (Odebrał)", align='C')
+                    pdf.cell(95, 5, "Kierownik Zmiany", align='C', ln=1)
                     
                     pdf_bytes = bytes(pdf.output())
                     st.session_state.archiwum_konf_pdf.append({"id": nr_knf_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "jumbo_szt": ile_tniemy, "pdf": pdf_bytes})
@@ -439,16 +463,13 @@ elif menu == "Moduł Production":
                     st.session_state.ostatnia_produkcja_pdf = pdf_bytes
                     st.session_state.nazwa_pliku_produkcji = f"{nr_knf_auto.replace('/', '_')}.pdf"
                     st.rerun()
-            elif zuzyte_cm < wymagane_cm:
-                st.warning(f"Suma szerokości wynosi {zuzyte_cm} cm. Rozdysponuj jeszcze {wymagane_cm - zuzyte_cm} cm.")
+            elif zuzyte_cm < 115:
+                st.warning(f"Suma szerokości to {zuzyte_cm} cm. Zagospodaruj pozostałe {115 - zuzyte_cm} cm.")
             else:
-                st.error(f"Suma szerokości wynosi {zuzyte_cm} cm. Przekroczono limit o {zuzyte_cm - wymagane_cm} cm!")
+                st.error(f"Suma szerokości wynosi {zuzyte_cm} cm. Przekroczono wymiar rolki bazowej o {zuzyte_cm - 115} cm!")
         else:
             st.warning("Brak rolek Jumbo na magazynie. Wyprodukuj je w Kroku 1.")
 
-# ==========================================
-# MODUŁ 4: BAZA KONTRAHENTÓW (NOWY CRM)
-# ==========================================
 elif menu == "Baza Kontrahentów (CRM)":
     st.header("Baza Kontrahentów")
     st.write("Zarządzanie relacjami z klientami oraz dostawcami surowców.")
@@ -511,9 +532,6 @@ elif menu == "Baza Kontrahentów (CRM)":
                 else:
                     st.error("Odrzucono. Pola Nazwa firmy oraz Adres rejestracyjny są obowiązkowe.")
 
-# ==========================================
-# MODUŁ 5: PRZYJĘCIE TOWARU (PZ)
-# ==========================================
 elif menu == "Przyjęcie Towaru (PZ)":
     st.header("Przyjęcie Zewnętrzne (PZ)")
     dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]["Nazwa"].tolist()
@@ -532,9 +550,6 @@ elif menu == "Przyjęcie Towaru (PZ)":
                 st.success("Zapisano przyjęcie zewnętrzne.")
                 st.rerun()
 
-# ==========================================
-# MODUŁ 6: WYDANIE TOWARU (WZ)
-# ==========================================
 elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
@@ -722,9 +737,6 @@ elif menu == "Wydanie Towaru (WZ)":
                         st.session_state.wz_koszyk = []
                         st.rerun()
 
-# ==========================================
-# MODUŁ 7: ARCHIWUM DOKUMENTÓW 
-# ==========================================
 elif menu == "Archiwum Dokumentów":
     st.header("Archiwum Dokumentów Operacyjnych i Technologicznych")
     
@@ -807,9 +819,6 @@ elif menu == "Archiwum Dokumentów":
                 key="btn_dl_knf"
             )
 
-# ==========================================
-# MODUŁ 8: PANEL ADMINA
-# ==========================================
 elif menu == "Panel Administracyjny":
     st.header("Narzędzia Administracyjne")
     tab_uzytkownicy, tab_korekt_surowce, tab_korekt_prod = st.tabs(["Konta Użytkowników", "Korekta Surowców", "Korekta Wyrobów Gotowych"])
@@ -838,7 +847,6 @@ elif menu == "Panel Administracyjny":
                 else: st.error("Wszystkie pola formularza są wymagane.")
 
     with tab_korekt_surowce:
-        st.info("UWAGA: Tylko dla celów inwentaryzacyjnych. Zmiany nadpisują obecne stany fizyczne w bazie bez generowania PDF.")
         zm_k = st.data_editor(st.session_state.komponenty, hide_index=True, use_container_width=True)
         if st.button("Zapisz korektę surowców"):
             st.session_state.komponenty = zm_k
@@ -846,7 +854,6 @@ elif menu == "Panel Administracyjny":
             st.rerun()
 
     with tab_korekt_prod:
-        st.info("UWAGA: Zmiany stacji konfekcji mogą wpłynąć na rozliczenia magazynowe.")
         zm_p = st.data_editor(st.session_state.produkty, hide_index=True, use_container_width=True)
         if st.button("Zapisz korektę produktów gotowych"):
             st.session_state.produkty = zm_p
