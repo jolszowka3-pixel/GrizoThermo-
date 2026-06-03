@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V48)
+# 1. INICJALIZACJA BAZY (WERSJA V47)
 # ==========================================
-if 'init_v48' not in st.session_state:
-    st.session_state.init_v48 = True
+if 'init_v47' not in st.session_state:
+    st.session_state.init_v47 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -96,6 +96,7 @@ if 'init_v48' not in st.session_state:
     ])
     
     st.session_state.archiwum_wz_pdf = []
+    # Usunięto tablice PDF dla poszczególnych procesów, zostawiamy tylko logi operacji
     st.session_state.log_jumbo = []
     st.session_state.log_konf = []
     st.session_state.log_okl = []
@@ -178,91 +179,47 @@ menu = st.sidebar.radio("Wybierz moduł:", opcje)
 # MODUŁ 1: PULPIT GŁÓWNY (DASHBOARD)
 # ==========================================
 if menu == "Pulpit Główny":
-    st.markdown("<h2 style='text-align: center; color: #1e3a8a; padding-bottom: 20px;'>🎛️ Centrum Dowodzenia: GrizoThermo+</h2>", unsafe_allow_html=True)
+    st.header("Pulpit Zarządzania: GrizoThermo+")
+    st.write("Podsumowanie operacyjne i statystyki krytyczne przedsiębiorstwa.")
     
     suma_gotowych = int(st.session_state.produkty["Stan"].sum())
     stan_jumbo = int(st.session_state.polprodukty.loc[0, "Stan"])
     stan_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
     oczekujace_zk = len([z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"])
 
-    # 1. KAFELKI KPI (NOWY WYGLĄD)
     col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
-    with col_kpi1:
-        st.markdown(f"""
-        <div style="background-color:#eff6ff;padding:20px;border-radius:10px;border-left:5px solid #2563eb;box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-            <p style="margin:0;color:#1e3a8a;font-size:13px;font-weight:bold;text-transform:uppercase;">📦 Wyroby Gotowe</p>
-            <h2 style="margin:0;color:#1e3a8a;font-size:32px;">{suma_gotowych} <span style="font-size:16px;">szt.</span></h2>
-        </div>
-        """, unsafe_allow_html=True)
-        
-    with col_kpi2:
-        st.markdown(f"""
-        <div style="background-color:#f5f3ff;padding:20px;border-radius:10px;border-left:5px solid #7c3aed;box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-            <p style="margin:0;color:#4c1d95;font-size:13px;font-weight:bold;text-transform:uppercase;">🧻 Półprodukt (Jumbo)</p>
-            <h2 style="margin:0;color:#4c1d95;font-size:32px;">{stan_jumbo} <span style="font-size:16px;">szt.</span></h2>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col_kpi3:
-        st.markdown(f"""
-        <div style="background-color:#ecfdf5;padding:20px;border-radius:10px;border-left:5px solid #059669;box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-            <p style="margin:0;color:#064e3b;font-size:13px;font-weight:bold;text-transform:uppercase;">🛠️ Zapas Aluminium</p>
-            <h2 style="margin:0;color:#064e3b;font-size:32px;">{stan_alu:g} <span style="font-size:16px;">mb</span></h2>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col_kpi4:
-        st.markdown(f"""
-        <div style="background-color:#fffbeb;padding:20px;border-radius:10px;border-left:5px solid #d97706;box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-            <p style="margin:0;color:#78350f;font-size:13px;font-weight:bold;text-transform:uppercase;">📋 Oczekujące ZK</p>
-            <h2 style="margin:0;color:#78350f;font-size:32px;">{oczekujace_zk} <span style="font-size:16px;">zlec.</span></h2>
-        </div>
-        """, unsafe_allow_html=True)
+    col_kpi1.metric("WYROBY GOTOWE (SUMA)", f"{suma_gotowych} szt.")
+    col_kpi2.metric("ROLKI JUMBO NA STANIE", f"{stan_jumbo} szt.")
+    col_kpi3.metric("ZAPAS ALUMINIUM", f"{stan_alu:g} mb")
+    col_kpi4.metric("OCZEKUJĄCE ZAMÓWIENIA ZK", f"{oczekujace_zk} szt.")
     
-    st.write("")
-    st.write("")
+    st.divider()
     
-    # 2. ALERTY SUROWCOWE
     braki_surowcowe = []
     for _, row_k in st.session_state.komponenty.iterrows():
         prog_alarmowy = st.session_state.receptura_baza.get(row_k['ID'], 0) * 20
         if row_k['Stan'] < prog_alarmowy:
             niedobor = prog_alarmowy - row_k['Stan']
-            braki_surowcowe.append(f"**{row_k['Nazwa']}** (Aktualnie: {row_k['Stan']:g} {row_k['Jednostka']}, brakuje: {niedobor:g} {row_k['Jednostka']})")
+            braki_surowcowe.append(f"{row_k['Nazwa']} (Aktualnie: {row_k['Stan']:g} {row_k['Jednostka']}, Deficyt: {niedobor:g} {row_k['Jednostka']})")
             
     if braki_surowcowe:
-        st.error("⚠️ **KRYTYCZNY POZIOM ZAPASÓW:** Aktualny stan nie pozwala na płynną produkcję (wymagane minimum na 20 szt. Jumbo). Zleć zamówienie do dostawców na:")
-        for b in braki_surowcowe:
-            st.markdown(f"- {b}")
-    else:
-        st.success("✅ **STATUS MAGAZYNU BAZOWEGO:** Wszystkie surowce są zabezpieczone i gotowe do produkcji pełnych partii.")
+        st.error("ALERT: Krytyczny poziom surowców produkcyjnych\n\nBieżący stan magazynowy poniżej uniemożliwia realizację partii 20 sztuk rolek Jumbo:\n\n" + "\n".join([f"* {b}" for b in braki_surowcowe]))
 
-    st.write("---")
-
-    # 3. WYKRESY I HISTORIA
-    col_dash1, col_dash2 = st.columns([1, 1])
+    st.write("")
+    col_dash1, col_dash2 = st.columns([2, 3])
     
     with col_dash1:
-        st.subheader("📊 Stan Surowców Bazowych")
+        st.subheader("Porównanie Stanu Surowców")
         df_chart = st.session_state.komponenty[["Nazwa", "Stan"]].set_index("Nazwa")
-        st.bar_chart(df_chart, color="#2563eb")
-        
-        df_prod = st.session_state.produkty[st.session_state.produkty["Stan"] > 0]
-        if not df_prod.empty:
-            st.write("")
-            st.subheader("📦 Najwięcej na magazynie (Wyroby Gotowe)")
-            df_prod_chart = df_prod[["Wariant", "Stan"]].set_index("Wariant")
-            st.bar_chart(df_prod_chart, color="#10b981")
-        else:
-            st.info("Brak gotowych produktów na magazynie. Hala czeka na produkcję!")
+        st.bar_chart(df_chart, y="Stan", color="#1e40af")
         
     with col_dash2:
-        st.subheader("⏱️ Ostatnie Zdarzenia w Systemie")
+        st.subheader("Ostatnie Operacje Systemowe")
         if st.session_state.historia.empty:
             st.info("Brak zarejestrowanych zdarzeń w bieżącej sesji.")
         else:
             st.dataframe(
-                st.session_state.historia.sort_values(by="Data", ascending=False).head(12),
+                st.session_state.historia.sort_values(by="Data", ascending=False).head(5),
                 use_container_width=True,
                 hide_index=True
             )
