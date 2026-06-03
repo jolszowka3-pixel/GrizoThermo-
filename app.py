@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V33 - CZYSTA)
+# 1. INICJALIZACJA BAZY (WERSJA V34)
 # ==========================================
-if 'init_v33' not in st.session_state:
-    st.session_state.init_v33 = True
+if 'init_v34' not in st.session_state:
+    st.session_state.init_v34 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -256,23 +256,23 @@ elif menu == "Stan Magazynu":
             st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {row["Stan"]:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
 # ==========================================
-# MODUŁ ZAMÓWIENIA (ZK) Z INTEGRACJĄ LIMITU 6 ROLEK
+# MODUŁ ZAMÓWIENIA (ZK) 
 # ==========================================
 elif menu == "Zamówienia (ZK)":
-    st.header("Zamówienia Klientów (ZK) i Planowanie Zapotrzebowania")
+    st.header("Zamówienia Klientów (ZK)")
     
-    if "ostatni_raport_zk_pdf" in st.session_state:
-        st.success("Wygenerowano raport produkcyjny.")
+    if "lista_zamowien_pdf" in st.session_state:
+        st.success("Wygenerowano zbiorczą listę zamówień.")
         st.download_button(
-            label="Pobierz Raport Zapotrzebowania i Plan Produkcji (.pdf)",
-            data=st.session_state.ostatni_raport_zk_pdf,
-            file_name="Raport_Planowania_Produkcji.pdf",
+            label="Pobierz Zbiorczą Listę Zamówień (.pdf)",
+            data=st.session_state.lista_zamowien_pdf,
+            file_name="Zbiorcza_Lista_Zamowien.pdf",
             mime="application/pdf",
             use_container_width=True
         )
         st.divider()
 
-    tab_nowe, tab_lista, tab_plan = st.tabs(["Wprowadź Nowe Zamówienie", "Rejestr Zamówień", "Kalkulator Zapotrzebowania i Raport PDF"])
+    tab_nowe, tab_lista, tab_wydruk = st.tabs(["Wprowadź Nowe Zamówienie", "Rejestr Zamówień", "Generuj Listę (PDF)"])
 
     with tab_nowe:
         st.subheader("Nowe Zamówienie ZK")
@@ -332,13 +332,83 @@ elif menu == "Zamówienia (ZK)":
                             z["Status"] = "Zrealizowane"
                             st.rerun()
 
+    with tab_wydruk:
+        st.subheader("Wydruk Zbiorczej Listy Zamówień")
+        st.write("Generuj zestawienie wszystkich zarejestrowanych zamówień do celów ewidencyjnych.")
+        if st.button("Generuj PDF ze zbiorczą listą zamówień", type="primary"):
+            if not st.session_state.zamowienia:
+                st.error("Brak zamówień do wygenerowania raportu.")
+            else:
+                font_path, font_bold_path = pobierz_czcionki()
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.add_font("Roboto", "", font_path)
+                pdf.add_font("Roboto", "B", font_bold_path)
+                
+                pdf.set_fill_color(240, 240, 240)
+                pdf.set_font("Roboto", "B", 14)
+                pdf.cell(0, 12, "ZBIORCZA LISTA ZAMÓWIEŃ (ZK)", border=0, ln=1, align='C', fill=True)
+                pdf.set_font("Roboto", "", 9)
+                pdf.cell(0, 6, f"Wygenerowano: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", border=0, ln=1, align='C')
+                pdf.ln(6)
+                
+                for z in reversed(st.session_state.zamowienia):
+                    pdf.set_font("Roboto", "B", 10)
+                    pdf.set_fill_color(248, 248, 248)
+                    pdf.cell(0, 8, f" {z['id']} | Klient: {z['klient']} | Status: {z['Status']}", border=1, ln=1, fill=True)
+                    pdf.set_font("Roboto", "", 9)
+                    for p in z['pozycje']:
+                        pdf.cell(10, 6, "-", align='R')
+                        pdf.cell(120, 6, p['Wariant'])
+                        pdf.cell(40, 6, f"{p['Ilość (szt.)']} szt.", ln=1)
+                    if z['uwagi']:
+                        pdf.set_font("Roboto", "B", 8)
+                        pdf.cell(10, 6, "")
+                        pdf.cell(160, 6, f"Uwagi: {z['uwagi']}", ln=1)
+                        pdf.set_font("Roboto", "", 9)
+                    pdf.ln(3)
+                
+                st.session_state.lista_zamowien_pdf = bytes(pdf.output())
+                st.rerun()
+
+# ==========================================
+# MODUŁ PRODUKCJI I PLANOWANIA ZAPOTRZEBOWANIA
+# ==========================================
+elif menu == "Moduł Production":
+    st.header("Zarządzanie Produkcją i Planowanie")
+    
+    if "ostatnia_produkcja_pdf" in st.session_state:
+        st.success(f"Zaksięgowano pomyślnie raport: {st.session_state.nazwa_pliku_produkcji}")
+        st.download_button(
+            label="Pobierz wygenerowany dokument (.pdf)",
+            data=st.session_state.ostatnia_produkcja_pdf,
+            file_name=st.session_state.nazwa_pliku_produkcji,
+            mime="application/pdf",
+            use_container_width=True
+        )
+        st.divider()
+
+    if "ostatni_raport_zk_pdf" in st.session_state:
+        st.success("Wygenerowano raport produkcyjny z planowania.")
+        st.download_button(
+            label="Pobierz Raport Zapotrzebowania i Plan Produkcji (.pdf)",
+            data=st.session_state.ostatni_raport_zk_pdf,
+            file_name="Raport_Planowania_Produkcji.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+        st.divider()
+    
+    tab_plan, tab1, tab2 = st.tabs(["Planowanie Zapotrzebowania", "KROK 1: Maszyna Główna", "KROK 2: Konfekcja (Zlecenie)"])
+    
+    # --- KROK 0: PLANOWANIE Z ZAMÓWIEN ---
     with tab_plan:
         st.subheader("Analiza Zapotrzebowania i Auto-Planer Cięcia")
         st.write("System analizuje wszystkie **Oczekujące** zamówienia i porównuje je ze stanem magazynu wyrobów gotowych.")
         
         oczekujace = [z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"]
         if not oczekujace:
-            st.info("Brak oczekujących zamówień. Magazyn nie wymaga uzupełnień celowych.")
+            st.info("Brak oczekujących zamówień zlecających produkcję. Magazyn nie wymaga uzupełnień celowych.")
         else:
             zapotrzebowanie = {}
             for z in oczekujace:
@@ -375,7 +445,6 @@ elif menu == "Zamówienia (ZK)":
                     i = 0
                     while i < len(items_to_pack):
                         nazwa, szer = items_to_pack[i]
-                        # Warunek: suma centymetrów <= 115 ORAZ limit 6 cięć
                         if roll_count + 1 <= 6 and used_cm + szer <= 115 and (115 - (used_cm + szer) != 5 or used_cm + szer == 115):
                             rolka[nazwa] = rolka.get(nazwa, 0) + 1
                             used_cm += szer
@@ -385,7 +454,6 @@ elif menu == "Zamówienia (ZK)":
                             i += 1
                             
                     rem = 115 - used_cm
-                    # Wypełnianie reszty rolki dla zerowego odpadu, dbając o limit max 6 rolek
                     while rem >= 10 and roll_count < 6:
                         pad_w = 15 if (rem % 15 == 0 or rem >= 15) and rem != 20 else 10
                         pad_nazwa = f"GrizoThermo+ {pad_w}cm - Nieoklejona (13mb)"
@@ -400,7 +468,7 @@ elif menu == "Zamówienia (ZK)":
                 
                 s_jumbo_akt = int(st.session_state.polprodukty.at[0, "Stan"])
                 if s_jumbo_akt < len(plan_rolek):
-                    st.warning(f"Posiadasz tylko {s_jumbo_akt} rolek Jumbo. Musisz najpierw wytłoczyć brakujące {len(plan_rolek) - s_jumbo_akt} szt.")
+                    st.warning(f"Posiadasz tylko {s_jumbo_akt} rolek Jumbo na magazynie. Musisz najpierw wytłoczyć brakujące {len(plan_rolek) - s_jumbo_akt} szt.")
                 
                 zliczone_szablony = {}
                 for r in plan_rolek:
@@ -415,7 +483,7 @@ elif menu == "Zamówienia (ZK)":
                     st.markdown(f"**SZABLON {i+1}** (Użyj na **{dane['ile']} szt.** rolek Jumbo): {wzor_txt}")
                     
                 st.write("")
-                if st.button("Generuj PDF Raportu Zapotrzebowania"):
+                if st.button("Generuj PDF Raportu Zapotrzebowania i Planu", type="primary"):
                     font_path, font_bold_path = pobierz_czcionki()
                     pdf = FPDF()
                     pdf.add_page()
@@ -462,24 +530,7 @@ elif menu == "Zamówienia (ZK)":
                     st.session_state.ostatni_raport_zk_pdf = bytes(pdf.output())
                     st.rerun()
 
-# ==========================================
-# MODUŁ 4: PRODUKCJA (Z LIMITOWANIEM DO 6 ROLEK)
-# ==========================================
-elif menu == "Moduł Production":
-    st.header("Zarządzanie Produkcją")
-    tab1, tab2 = st.tabs(["KROK 1: Maszyna Główna", "KROK 2: Konfekcja (Zlecenie Rozkroju)"])
-    
-    if "ostatnia_produkcja_pdf" in st.session_state:
-        st.success(f"Zaksięgowano pomyślnie raport: {st.session_state.nazwa_pliku_produkcji}")
-        st.download_button(
-            label="Pobierz wygenerowaną kartę procesu / zlecenia (.pdf)",
-            data=st.session_state.ostatnia_produkcja_pdf,
-            file_name=st.session_state.nazwa_pliku_produkcji,
-            mime="application/pdf",
-            use_container_width=True
-        )
-        st.divider()
-    
+    # --- KROK 1 ---
     with tab1:
         st.subheader("Wytłaczanie Rolek Jumbo (115cm x 13mb)")
         s_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
@@ -571,6 +622,7 @@ elif menu == "Moduł Production":
         else:
             st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
 
+    # --- KROK 2 ---
     with tab2:
         st.subheader("Konfekcja (Tworzenie Zlecenia Rozkroju)")
         s_jumbo = int(st.session_state.polprodukty.at[0, "Stan"])
@@ -734,9 +786,6 @@ elif menu == "Moduł Production":
                     st.session_state.konf_koszyk = []
                     st.rerun()
 
-# ==========================================
-# MODUŁ 5: BAZA KONTRAHENTÓW (CRM)
-# ==========================================
 elif menu == "Baza Kontrahentów (CRM)":
     st.header("Baza Kontrahentów")
     st.write("Zarządzanie relacjami z klientami oraz dostawcami surowców.")
@@ -799,9 +848,6 @@ elif menu == "Baza Kontrahentów (CRM)":
                 else:
                     st.error("Odrzucono. Pola Nazwa firmy oraz Adres rejestracyjny są obowiązkowe.")
 
-# ==========================================
-# MODUŁ 6: PRZYJĘCIE TOWARU (PZ)
-# ==========================================
 elif menu == "Przyjęcie Towaru (PZ)":
     st.header("Przyjęcie Zewnętrzne (PZ)")
     dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]["Nazwa"].tolist()
@@ -820,9 +866,6 @@ elif menu == "Przyjęcie Towaru (PZ)":
                 st.success("Zapisano przyjęcie zewnętrzne.")
                 st.rerun()
 
-# ==========================================
-# MODUŁ 7: WYDANIE TOWARU (WZ)
-# ==========================================
 elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
@@ -1043,9 +1086,6 @@ elif menu == "Wydanie Towaru (WZ)":
                             st.session_state.wz_koszyk = []
                             st.rerun()
 
-# ==========================================
-# MODUŁ 8: ARCHIWUM DOKUMENTÓW
-# ==========================================
 elif menu == "Archiwum Dokumentów":
     st.header("Archiwum Dokumentów Operacyjnych i Technologicznych")
     
@@ -1128,9 +1168,6 @@ elif menu == "Archiwum Dokumentów":
                 key="btn_dl_knf"
             )
 
-# ==========================================
-# MODUŁ 9: PANEL ADMINISTRACYJNY
-# ==========================================
 elif menu == "Panel Administracyjny":
     st.header("Narzędzia Administracyjne")
     tab_uzytkownicy, tab_korekt_surowce, tab_korekt_prod = st.tabs(["Konta Użytkowników", "Korekta Surowców", "Korekta Wyrobów Gotowych"])
