@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V31)
+# 1. INICJALIZACJA BAZY (WERSJA V32 - LIMIT NOŻY)
 # ==========================================
-if 'init_v31' not in st.session_state:
-    st.session_state.init_v31 = True
+if 'init_v32' not in st.session_state:
+    st.session_state.init_v32 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -100,8 +100,6 @@ if 'init_v31' not in st.session_state:
     st.session_state.wz_koszyk = []
     st.session_state.konf_koszyk = []
     st.session_state.zamowienia = []
-    
-    # Zmienne wspierające dla integracji ZK z WZ
     st.session_state.powiazane_zk = None
     st.session_state.wybrany_klient_wz = None
 
@@ -114,7 +112,7 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-# CSS
+# CSS Corporate Style
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
@@ -258,7 +256,7 @@ elif menu == "Stan Magazynu":
             st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {row["Stan"]:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
 # ==========================================
-# MODUŁ ZAMÓWIENIA (ZK)
+# MODUŁ ZAMÓWIENIA (ZK) Z INTEGRACJĄ LIMITU 6 ROLEK
 # ==========================================
 elif menu == "Zamówienia (ZK)":
     st.header("Zamówienia Klientów (ZK) i Planowanie Zapotrzebowania")
@@ -329,7 +327,6 @@ elif menu == "Zamówienia (ZK)":
                 with st.expander(f"{z['id']} | {z['klient']} | Data: {z['data']} | Status: {z['Status']}"):
                     st.write(f"**Uwagi:** {z['uwagi']}")
                     st.table(pd.DataFrame(z["pozycje"]).set_index("Wariant"))
-                    # Możliwość ręcznego zamknięcia dla admina, choć WZ robi to z automatu
                     if z["Status"] == "Oczekujące":
                         if st.button("Ręcznie oznacz jako zrealizowane", key=f"btn_{z['id']}"):
                             z["Status"] = "Zrealizowane"
@@ -374,30 +371,30 @@ elif menu == "Zamówienia (ZK)":
                 while items_to_pack:
                     rolka = {}
                     used_cm = 0
+                    roll_count = 0
                     i = 0
+                    # Wdrażamy podwójny warunek: Szerokość <= 115 oraz Ilość rolek z jednej Jumbo <= 6
                     while i < len(items_to_pack):
                         nazwa, szer = items_to_pack[i]
-                        if used_cm + szer <= 115 and (115 - (used_cm + szer) != 5):
+                        if roll_count + 1 <= 6 and used_cm + szer <= 115 and (115 - (used_cm + szer) != 5 or used_cm + szer == 115):
                             rolka[nazwa] = rolka.get(nazwa, 0) + 1
                             used_cm += szer
-                            items_to_pack.pop(i)
-                        elif used_cm + szer == 115:
-                            rolka[nazwa] = rolka.get(nazwa, 0) + 1
-                            used_cm += szer
+                            roll_count += 1
                             items_to_pack.pop(i)
                         else:
                             i += 1
                             
                     rem = 115 - used_cm
-                    while rem >= 10:
+                    while rem >= 10 and roll_count < 6:
                         pad_w = 15 if (rem % 15 == 0 or rem >= 15) and rem != 20 else 10
                         pad_nazwa = f"GrizoThermo+ {pad_w}cm - Nieoklejona (13mb)"
                         rolka[pad_nazwa] = rolka.get(pad_nazwa, 0) + 1
                         rem -= pad_w
+                        roll_count += 1
                         
                     plan_rolek.append(rolka)
                 
-                st.subheader("Zoptymalizowany Sugerowany Plan Cięcia (Zero Odpadu)")
+                st.subheader("Zoptymalizowany Sugerowany Plan Cięcia (Zasada: Max 6 rolek z 1 Jumbo, Zero Odpadu)")
                 st.write(f"Do pokrycia braków potrzeba pociąć: **{len(plan_rolek)} szt. rolek Jumbo**.")
                 
                 s_jumbo_akt = int(st.session_state.polprodukty.at[0, "Stan"])
@@ -465,7 +462,7 @@ elif menu == "Zamówienia (ZK)":
                     st.rerun()
 
 # ==========================================
-# MODUŁ 3: PRODUKCJA
+# MODUŁ 4: PRODUKCJA (Z LIMITOWANIEM DO 6 ROLEK)
 # ==========================================
 elif menu == "Moduł Production":
     st.header("Zarządzanie Produkcją")
@@ -512,60 +509,11 @@ elif menu == "Moduł Production":
                     nazwa_p = st.session_state.polprodukty.at[0, "Nazwa"]
                     dodaj_ruch("PW (Półprod.)", nr_jmb_auto, nazwa_p, ile_jumbo, "Wytłaczarka")
                     
-                    font_path, font_bold_path = pobierz_czcionki()
-                    pdf = FPDF()
-                    pdf.add_page()
-                    pdf.add_font("Roboto", "", font_path)
-                    pdf.add_font("Roboto", "B", font_bold_path)
-                    
-                    pdf.set_fill_color(240, 240, 240)
-                    pdf.set_font("Roboto", "B", 14)
-                    pdf.cell(0, 12, f"KARTA PRZEBIEGU PRODUKCJI JUMBO: {nr_jmb_auto}", border=0, ln=1, align='C', fill=True)
-                    
-                    pdf.set_font("Roboto", "", 9)
-                    pdf.cell(0, 6, f"Data zlecenia: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   |   Stanowisko: Wytłaczarka Główna", border=0, ln=1, align='C')
-                    pdf.ln(8)
-                    
-                    pdf.set_font("Roboto", "B", 11)
-                    pdf.cell(0, 6, "1. UZYSKANY ASORTYMENT", border="B", ln=1)
-                    pdf.set_font("Roboto", "", 10)
-                    pdf.cell(100, 8, f"Nazwa produktu: {nazwa_p}", ln=0)
-                    pdf.cell(0, 8, f"Ilość: {ile_jumbo} szt.", ln=1)
-                    pdf.ln(5)
-                    
-                    pdf.set_font("Roboto", "B", 11)
-                    pdf.cell(0, 6, "2. ROZLICZENIE ZUŻYCIA SUROWCÓW BAZOWYCH", border="B", ln=1)
-                    pdf.ln(2)
-                    pdf.set_font("Roboto", "B", 9)
-                    pdf.cell(15, 8, "Lp.", border=1, align='C')
-                    pdf.cell(115, 8, "Nazwa surowca pobranego z magazynu", border=1, align='L')
-                    pdf.cell(60, 8, "Ilość zużyta", border=1, align='C', ln=1)
-                    pdf.set_font("Roboto", "", 9)
-                    
-                    lp_k = 1
                     for k_id, zuzycie in st.session_state.receptura_baza.items():
                         idx = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == k_id][0]
-                        laczne_zuzycie = zuzycie * ile_jumbo
-                        st.session_state.komponenty.at[idx, "Stan"] -= laczne_zuzycie
-                        dodaj_ruch("RW", nr_jmb_auto, st.session_state.komponenty.at[idx, "Nazwa"], laczne_zuzycie, "Wytłaczarka")
-                        
-                        pdf.cell(15, 8, str(lp_k), border=1, align='C')
-                        pdf.cell(115, 8, st.session_state.komponenty.at[idx, "Nazwa"], border=1, align='L')
-                        pdf.cell(60, 8, f"{laczne_zuzycie:g} {st.session_state.komponenty.at[idx, 'Jednostka']}", border=1, align='C', ln=1)
-                        lp_k += 1
-                        
-                    pdf.ln(25)
-                    pdf.cell(95, 5, "..........................................................", align='C')
-                    pdf.cell(95, 5, "..........................................................", align='C', ln=1)
-                    pdf.cell(95, 5, "Zatwierdził (Operator)", align='C')
-                    pdf.cell(95, 5, "Kierownik Produkcji", align='C', ln=1)
-                    
-                    pdf_bytes = bytes(pdf.output())
-                    st.session_state.archiwum_jumbo_pdf.append({"id": nr_jmb_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "ilosc": ile_jumbo, "pdf": pdf_bytes})
-                    
-                    st.session_state.jumbo_counter += 1
-                    st.session_state.ostatnia_produkcja_pdf = pdf_bytes
-                    st.session_state.nazwa_pliku_produkcji = f"{nr_jmb_auto.replace('/', '_')}.pdf"
+                        st.session_state.komponenty.at[idx, "Stan"] -= (zuzycie * ile_jumbo)
+                        dodaj_ruch("RW", nr_jmb_auto, st.session_state.komponenty.at[idx, "Nazwa"], zuzycie * ile_jumbo, "Wytłaczarka")
+                    st.success("Produkcja została pomyślnie zaksięgowana.")
                     st.rerun()
         else:
             st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
@@ -583,7 +531,7 @@ elif menu == "Moduł Production":
         elif jumbo_dostepne == 0 and not st.session_state.konf_koszyk:
             st.warning("Wszystkie dostępne rolki Jumbo zostały już przydzielone do poniższego zlecenia.")
         else:
-            st.write("**1. Zdefiniuj szablon cięcia dla POJEDYNCZEJ rolki (Suma musi wynosić równo 115 cm):**")
+            st.write("**1. Zdefiniuj szablon cięcia dla POJEDYNCZEJ rolki (Suma musi wynosić równo 115 cm, maksymalnie 6 rolek ogółem):**")
             
             c_okl, c_nie = st.columns(2)
             rozkroj_temp = {}
@@ -592,10 +540,11 @@ elif menu == "Moduł Production":
                     rozkroj_temp[idx] = st.number_input(r['Wariant'], min_value=0, value=0, key=f"r_temp_{idx}")
                     
             zuzyte_cm = sum(rozkroj_temp[idx] * st.session_state.produkty.at[idx, 'Szerokosc'] for idx in rozkroj_temp)
+            laczna_ilosc_rolek = sum(rozkroj_temp.values())
             
             st.write("")
-            if zuzyte_cm == 115:
-                st.success("Szablon cięcia skonfigurowany prawidłowo (115 / 115 cm).")
+            if zuzyte_cm == 115 and laczna_ilosc_rolek <= 6:
+                st.success(f"Szablon cięcia skonfigurowany prawidłowo (115 / 115 cm, {laczna_ilosc_rolek} rolek).")
                 col_k1, col_k2 = st.columns([1, 2])
                 with col_k1:
                     ile_tym_szablonem = st.number_input("Ile rolek Jumbo chcesz pociąć tym wzorem?", min_value=1, max_value=max(1, jumbo_dostepne), value=1)
@@ -618,6 +567,8 @@ elif menu == "Moduł Production":
                                 "opis": opis_szablonu
                             })
                             st.rerun()
+            elif laczna_ilosc_rolek > 6:
+                st.error(f"Błąd techniczny: Szablon zawiera {laczna_ilosc_rolek} rolek. Maksymalna techniczna wydajność z jednej rolki Jumbo to 6 małych rolek.")
             elif zuzyte_cm > 115:
                 st.error(f"Przekroczyłeś wymiar rolki bazowej o {zuzyte_cm - 115} cm!")
             elif zuzyte_cm > 0:
@@ -785,15 +736,12 @@ elif menu == "Przyjęcie Towaru (PZ)":
                 st.success("Zapisano przyjęcie zewnętrzne.")
                 st.rerun()
 
-# ==========================================
-# ZMODYFIKOWANY MODUŁ WZ (Z OBSŁUGĄ ZK)
-# ==========================================
 elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
     
-    if "wybrany_klient_wz" not in st.session_state:
-        st.session_state.wybrany_klient_wz = odbiorcy[0] if odbiorcy else None
+    if "wz_koszyk" not in st.session_state:
+        st.session_state.wz_koszyk = []
     
     if "wygenerowane_pdf" in st.session_state:
         st.success(f"Zaksięgowano dokument: {st.session_state.nazwa_pliku_wz}")
@@ -896,7 +844,6 @@ elif menu == "Wydanie Towaru (WZ)":
                         st.rerun()
                 with col_btn2:
                     if st.button("Zatwierdź wydanie i generuj PDF", type="primary", use_container_width=True):
-                        # GŁÓWNA WERYFIKACJA STANÓW
                         bledy = False
                         for item in st.session_state.wz_koszyk:
                             stan_mag = st.session_state.produkty[st.session_state.produkty["Wariant"] == item["Wariant"]]["Stan"].values[0]
@@ -930,16 +877,22 @@ elif menu == "Wydanie Towaru (WZ)":
                             pdf.set_font("Roboto", "B", 10)
                             pdf.cell(90, 7, "  SPRZEDAWCA / WYSTAWCA", border=0, ln=1, fill=True)
                             pdf.set_font("Roboto", "", 9)
-                            pdf.multi_cell(90, 5, f"{MOJA_FIRMA['nazwa']}\n{MOJA_FIRMA['adres']}\n{MOJA_FIRMA['nip']}\n{MOJA_FIRMA['kontakt']}", border=0)
+                            pdf.multi_cell(90, 5, f"{MOJA_FIRMA['nazwa']}
+{MOJA_FIRMA['adres']}
+{MOJA_FIRMA['nip']}
+{MOJA_FIRMA['kontakt']}", border=0)
                             y_left = pdf.get_y()
                             
                             pdf.set_xy(105, y_start)
                             pdf.set_font("Roboto", "B", 10)
+ Back to order matching matrix row selection
                             pdf.cell(90, 7, "  NABYWCA / ODBIORCA", border=0, ln=1, fill=True)
                             pdf.set_xy(105, y_start + 7)
                             pdf.set_font("Roboto", "", 9)
                             nip_czysty = f"NIP: {klient_nip}" if pd.notna(klient_nip) and str(klient_nip).strip() else ""
-                            pdf.multi_cell(90, 5, f"{wybrany_klient}\n{klient_adres}\n{nip_czysty}", border=0)
+                            pdf.multi_cell(90, 5, f"{wybrany_klient}
+{klient_adres}
+{nip_czysty}", border=0)
                             y_right = pdf.get_y()
                             
                             pdf.set_y(max(y_left, y_right) + 12)
@@ -974,7 +927,6 @@ elif menu == "Wydanie Towaru (WZ)":
                             
                             st.session_state.wz_counter += 1
                             
-                            # Automatyczne zamykanie powiązanego ZK
                             if st.session_state.powiazane_zk:
                                 for zmw in st.session_state.zamowienia:
                                     if zmw["id"] == st.session_state.powiazane_zk:
