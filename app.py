@@ -21,6 +21,10 @@ ID_ARKUSZA_GOOGLE = "https://docs.google.com/spreadsheets/d/1kmiEb4jaUSmZSsqsi6L
 def podlacz_google_sheets():
     try:
         creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+        
+        # TA LINIJKA JEST KLUCZOWA - naprawia błąd "Invalid JWT Signature" ze Streamlit:
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(creds)
