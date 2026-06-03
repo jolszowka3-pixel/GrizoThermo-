@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 import urllib.request
 from fpdf import FPDF
+import math
 
 # Konfiguracja strony
 st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
@@ -37,13 +38,14 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY
+# 1. INICJALIZACJA BAZY (WERSJA V30)
 # ==========================================
-if 'init_v29' not in st.session_state:
-    st.session_state.init_v29 = True
+if 'init_v30' not in st.session_state:
+    st.session_state.init_v30 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
+    st.session_state.zk_counter = 1
     
     st.session_state.uzytkownicy = {
         "admin": {
@@ -98,6 +100,7 @@ if 'init_v29' not in st.session_state:
     st.session_state.archiwum_konf_pdf = []
     st.session_state.wz_koszyk = []
     st.session_state.konf_koszyk = []
+    st.session_state.zamowienia = []
 
 def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     uzytkownik = st.session_state.aktualny_uzytkownik if st.session_state.aktualny_uzytkownik else "System"
@@ -108,7 +111,7 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-# CSS Corporate Style
+# CSS
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
@@ -156,6 +159,7 @@ if st.sidebar.button("Wyloguj", use_container_width=True):
 
 st.sidebar.divider()
 opcje = ["Pulpit Główny", "Stan Magazynu"]
+if st.session_state.aktualne_uprawnienia.get("wz"): opcje.append("Zamówienia (ZK)")
 if st.session_state.aktualne_uprawnienia.get("produkcja"): opcje.append("Moduł Production")
 if st.session_state.aktualne_uprawnienia.get("pz"): opcje.append("Przyjęcie Towaru (PZ)")
 if st.session_state.aktualne_uprawnienia.get("wz"): opcje.append("Wydanie Towaru (WZ)")
@@ -176,13 +180,13 @@ if menu == "Pulpit Główny":
     suma_gotowych = int(st.session_state.produkty["Stan"].sum())
     stan_jumbo = int(st.session_state.polprodukty.loc[0, "Stan"])
     stan_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
-    liczba_wz = len(st.session_state.archiwum_wz_pdf)
+    oczekujace_zk = len([z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"])
 
     col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
     col_kpi1.metric("WYROBY GOTOWE (SUMA)", f"{suma_gotowych} szt.")
     col_kpi2.metric("ROLKI JUMBO NA STANIE", f"{stan_jumbo} szt.")
     col_kpi3.metric("ZAPAS ALUMINIUM", f"{stan_alu:g} mb")
-    col_kpi4.metric("WYSTAWIONE DOKUMENTY WZ", f"{liczba_wz} szt.")
+    col_kpi4.metric("OCZEKUJĄCE ZAMÓWIENIA ZK", f"{oczekujace_zk} szt.")
     
     st.divider()
     
@@ -195,8 +199,6 @@ if menu == "Pulpit Główny":
             
     if braki_surowcowe:
         st.error("ALERT: Krytyczny poziom surowców produkcyjnych\n\nBieżący stan magazynowy poniżej uniemożliwia realizację partii 20 sztuk rolek Jumbo:\n\n" + "\n".join([f"* {b}" for b in braki_surowcowe]))
-    else:
-        st.success("Wszystkie surowce bazowe zabezpieczają minimum produkcyjne na 20 sztuk rolek Jumbo.")
 
     st.write("")
     col_dash1, col_dash2 = st.columns([2, 3])
@@ -253,13 +255,226 @@ elif menu == "Stan Magazynu":
             st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {row["Stan"]:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
 # ==========================================
-# MODUŁ 3: PRODUKCJA
+# MODUŁ ZAMÓWIENIA (ZK) - NOWY
+# ==========================================
+elif menu == "Zamówienia (ZK)":
+    st.header("Zamówienia Klientów (ZK) i Planowanie Zapotrzebowania")
+    
+    if "ostatni_raport_zk_pdf" in st.session_state:
+        st.success(f"Wygenerowano raport produkcyjny.")
+        st.download_button(
+            label="Pobierz Raport Zapotrzebowania i Plan Produkcji (.pdf)",
+            data=st.session_state.ostatni_raport_zk_pdf,
+            file_name="Raport_Planowania_Produkcji.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+        st.divider()
+
+    tab_nowe, tab_lista, tab_plan = st.tabs(["Wprowadź Nowe Zamówienie", "Rejestr Zamówień", "Kalkulator Zapotrzebowania i Raport PDF"])
+
+    with tab_nowe:
+        st.subheader("Nowe Zamówienie ZK")
+        odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
+        if not odbiorcy:
+            st.warning("Brak odbiorców w bazie. Przejdź do CRM.")
+        else:
+            data_dzis_str = datetime.now().strftime("%Y/%m/%d")
+            nr_zk_auto = f"ZK/{data_dzis_str}/{st.session_state.zk_counter:03d}"
+            
+            with st.form("nowe_zk"):
+                col_zk1, col_zk2 = st.columns(2)
+                klient = col_zk1.selectbox("Klient zamawiający", odbiorcy)
+                uwagi = col_zk2.text_input("Uwagi do zamówienia")
+                
+                st.write("Wprowadź ilości zamawianych produktów:")
+                df_zk = st.session_state.produkty[["Wariant"]].copy()
+                df_zk["Ilość (szt.)"] = 0
+                
+                zamawiane_dane = st.data_editor(
+                    df_zk, hide_index=True, use_container_width=True,
+                    column_config={
+                        "Wariant": st.column_config.TextColumn("Nazwa asortymentu", disabled=True),
+                        "Ilość (szt.)": st.column_config.NumberColumn("Zamawiana ilość", min_value=0, step=1)
+                    }
+                )
+                
+                if st.form_submit_button("Zarejestruj Zamówienie"):
+                    pozycje = zamawiane_dane[zamawiane_dane["Ilość (szt.)"] > 0]
+                    if pozycje.empty:
+                        st.error("Musisz zamówić przynajmniej 1 produkt.")
+                    else:
+                        szczegoly = pozycje.to_dict('records')
+                        st.session_state.zamowienia.append({
+                            "id": nr_zk_auto,
+                            "data": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            "klient": klient,
+                            "pozycje": szczegoly,
+                            "uwagi": uwagi,
+                            "Status": "Oczekujące"
+                        })
+                        st.session_state.zk_counter += 1
+                        st.success(f"Zamówienie {nr_zk_auto} zostało przyjęte w systemie.")
+                        st.rerun()
+
+    with tab_lista:
+        st.subheader("Bieżące Zamówienia")
+        if not st.session_state.zamowienia:
+            st.info("Brak zarejestrowanych zamówień.")
+        else:
+            for z in reversed(st.session_state.zamowienia):
+                with st.expander(f"{z['id']} | {z['klient']} | Data: {z['data']} | Status: {z['Status']}"):
+                    st.write(f"**Uwagi:** {z['uwagi']}")
+                    st.table(pd.DataFrame(z["pozycje"]).set_index("Wariant"))
+                    if z["Status"] == "Oczekujące":
+                        if st.button("Oznacz jako Zrealizowane (Tylko status)", key=f"btn_{z['id']}"):
+                            z["Status"] = "Zrealizowane"
+                            st.rerun()
+
+    with tab_plan:
+        st.subheader("Analiza Zapotrzebowania i Auto-Planer Cięcia")
+        st.write("System analizuje wszystkie **Oczekujące** zamówienia i porównuje je ze stanem magazynu wyrobów gotowych.")
+        
+        oczekujace = [z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"]
+        if not oczekujace:
+            st.info("Brak oczekujących zamówień. Magazyn nie wymaga uzupełnień celowych.")
+        else:
+            # Agregacja zapotrzebowania
+            zapotrzebowanie = {}
+            for z in oczekujace:
+                for p in z["pozycje"]:
+                    wariant = p["Wariant"]
+                    zapotrzebowanie[wariant] = zapotrzebowanie.get(wariant, 0) + p["Ilość (szt.)"]
+                    
+            # Zderzenie ze stanem magazynowym
+            braki = []
+            for wariant, ilosc_wymagana in zapotrzebowanie.items():
+                stan_mag = st.session_state.produkty[st.session_state.produkty["Wariant"] == wariant]["Stan"].values[0]
+                if ilosc_wymagana > stan_mag:
+                    brak = ilosc_wymagana - stan_mag
+                    szerokosc = st.session_state.produkty[st.session_state.produkty["Wariant"] == wariant]["Szerokosc"].values[0]
+                    braki.append({"Wariant": wariant, "Brak_szt": int(brak), "Szerokosc": int(szerokosc)})
+            
+            if not braki:
+                st.success("Masz wystarczającą ilość produktów na magazynie, aby zrealizować wszystkie bieżące zamówienia.")
+            else:
+                st.error("Wykryto braki asortymentu w stosunku do zamówień. Wymagane uruchomienie konfekcji.")
+                df_braki = pd.DataFrame(braki)
+                st.dataframe(df_braki[["Wariant", "Brak_szt"]], use_container_width=True, hide_index=True)
+                
+                # Uproszczony algorytm pakowania zerowego odpadu (115cm)
+                items_to_pack = []
+                for b in braki:
+                    items_to_pack.extend([(b["Wariant"], b["Szerokosc"])] * b["Brak_szt"])
+                
+                # Sortowanie od największych szerokości
+                items_to_pack.sort(key=lambda x: x[1], reverse=True)
+                
+                plan_rolek = []
+                while items_to_pack:
+                    rolka = {}
+                    used_cm = 0
+                    i = 0
+                    # 1. Próba upakowania potrzebnych elementów
+                    while i < len(items_to_pack):
+                        nazwa, szer = items_to_pack[i]
+                        # Unikamy zostawiania dokładnie 5 cm na końcu (bo najmniejsza rolka to 10cm)
+                        if used_cm + szer <= 115 and (115 - (used_cm + szer) != 5):
+                            rolka[nazwa] = rolka.get(nazwa, 0) + 1
+                            used_cm += szer
+                            items_to_pack.pop(i)
+                        elif used_cm + szer == 115:
+                            rolka[nazwa] = rolka.get(nazwa, 0) + 1
+                            used_cm += szer
+                            items_to_pack.pop(i)
+                        else:
+                            i += 1
+                            
+                    # 2. Dopełnianie rolki produktami standardowymi do pełnych 115cm (na magazyn)
+                    rem = 115 - used_cm
+                    while rem >= 10:
+                        pad_w = 15 if (rem % 15 == 0 or rem >= 15) and rem != 20 else 10
+                        pad_nazwa = f"GrizoThermo+ {pad_w}cm - Nieoklejona (13mb)"
+                        rolka[pad_nazwa] = rolka.get(pad_nazwa, 0) + 1
+                        rem -= pad_w
+                        
+                    plan_rolek.append(rolka)
+                
+                st.subheader("Zoptymalizowany Sugerowany Plan Cięcia (Zero Odpadu)")
+                st.write(f"Do pokrycia braków potrzeba pociąć: **{len(plan_rolek)} szt. rolek Jumbo**.")
+                
+                s_jumbo_akt = int(st.session_state.polprodukty.at[0, "Stan"])
+                if s_jumbo_akt < len(plan_rolek):
+                    st.warning(f"Posiadasz tylko {s_jumbo_akt} rolek Jumbo. Musisz najpierw wytłoczyć brakujące {len(plan_rolek) - s_jumbo_akt} szt.")
+                
+                # Zliczanie takich samych szablonów
+                zliczone_szablony = {}
+                for r in plan_rolek:
+                    klucz = str(dict(sorted(r.items())))
+                    if klucz not in zliczone_szablony:
+                        zliczone_szablony[klucz] = {"wzor": r, "ile": 1}
+                    else:
+                        zliczone_szablony[klucz]["ile"] += 1
+                        
+                for i, (_, dane) in enumerate(zliczone_szablony.items()):
+                    wzor_txt = " | ".join([f"{qty}x {k.split(' - ')[0].replace('GrizoThermo+ ', '')}" for k, qty in dane["wzor"].items()])
+                    st.markdown(f"**SZABLON {i+1}** (Użyj na **{dane['ile']} szt.** rolek Jumbo): {wzor_txt}")
+                    
+                st.write("")
+                if st.button("Generuj PDF Raportu Zapotrzebowania"):
+                    font_path, font_bold_path = pobierz_czcionki()
+                    pdf = FPDF()
+                    pdf.add_page()
+                    pdf.add_font("Roboto", "", font_path)
+                    pdf.add_font("Roboto", "B", font_bold_path)
+                    
+                    pdf.set_fill_color(240, 240, 240)
+                    pdf.set_font("Roboto", "B", 14)
+                    pdf.cell(0, 12, "RAPORT ZAPOTRZEBOWANIA I SUGEROWANY PLAN PRODUKCJI", border=0, ln=1, align='C', fill=True)
+                    
+                    pdf.set_font("Roboto", "", 9)
+                    pdf.cell(0, 6, f"Wygenerowano: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", border=0, ln=1, align='C')
+                    pdf.ln(6)
+                    
+                    pdf.set_font("Roboto", "B", 11)
+                    pdf.cell(0, 6, "1. ZESTAWIENIE BRAKÓW ASORTYMENTOWYCH", border="B", ln=1)
+                    pdf.ln(2)
+                    pdf.set_font("Roboto", "B", 9)
+                    pdf.cell(140, 8, "Asortyment wymagający uzupełnienia", border=1, align='L')
+                    pdf.cell(50, 8, "Ilość brakująca", border=1, align='C', ln=1)
+                    pdf.set_font("Roboto", "", 9)
+                    for b in braki:
+                        pdf.cell(140, 8, b["Wariant"], border=1, align='L')
+                        pdf.cell(50, 8, f"{b['Brak_szt']} szt.", border=1, align='C', ln=1)
+                        
+                    pdf.ln(8)
+                    pdf.set_font("Roboto", "B", 11)
+                    pdf.cell(0, 6, "2. OPTYMALNY PLAN ROZKROJU ROLEK JUMBO", border="B", ln=1)
+                    pdf.set_font("Roboto", "", 10)
+                    pdf.cell(0, 8, f"Wymagane zmagazynowanie i pocięcie: {len(plan_rolek)} szt. rolek Jumbo (115cm).", ln=1)
+                    pdf.ln(2)
+                    
+                    for i, (_, dane) in enumerate(zliczone_szablony.items()):
+                        pdf.set_font("Roboto", "B", 10)
+                        pdf.set_fill_color(248, 248, 248)
+                        pdf.cell(0, 8, f" SZABLON NR {i+1} (Użyć dla {dane['ile']} szt. rolek Jumbo)", border=1, ln=1, fill=True)
+                        pdf.set_font("Roboto", "", 9)
+                        for n, q in dane["wzor"].items():
+                            pdf.cell(10, 6, "-", align='R')
+                            pdf.cell(120, 6, n)
+                            pdf.cell(40, 6, f"Wytnij: {q} szt.", ln=1)
+                        pdf.ln(3)
+                        
+                    st.session_state.ostatni_raport_zk_pdf = bytes(pdf.output())
+                    st.rerun()
+
+# ==========================================
+# MODUŁ 3: PRODUKCJA (DWUETAPOWA Z RAPORTAMI PDF)
 # ==========================================
 elif menu == "Moduł Production":
     st.header("Zarządzanie Produkcją")
     tab1, tab2 = st.tabs(["KROK 1: Maszyna Główna", "KROK 2: Konfekcja (Zlecenie Rozkroju)"])
     
-    # Powiadomienia o wygenerowanych PDF z logiki produkcyjnej
     if "ostatnia_produkcja_pdf" in st.session_state:
         st.success(f"Zaksięgowano pomyślnie raport: {st.session_state.nazwa_pliku_produkcji}")
         st.download_button(
@@ -367,12 +582,12 @@ elif menu == "Moduł Production":
         jumbo_w_koszyku = sum(item["ile_rolek"] for item in st.session_state.konf_koszyk)
         jumbo_dostepne = s_jumbo - jumbo_w_koszyku
         
-        st.info(f"Fizyczny stan na magazynie: {s_jumbo} szt. Jumbo. (Dostępne do zaplanowania: {jumbo_dostepne} szt.)")
+        st.info(f"Fizyczny stan na magazynie: {s_jumbo} szt. Jumbo. (Dostępne do zaplanowania w tym zleceniu: {jumbo_dostepne} szt.)")
         
         if s_jumbo == 0:
             st.warning("Brak rolek Jumbo na magazynie. Wyprodukuj je w Kroku 1.")
         elif jumbo_dostepne == 0 and not st.session_state.konf_koszyk:
-            st.warning("Brak dostępnych rolek Jumbo.")
+            st.warning("Wszystkie dostępne rolki Jumbo zostały już przydzielone do poniższego zlecenia.")
         else:
             st.write("**1. Zdefiniuj szablon cięcia dla POJEDYNCZEJ rolki (Suma musi wynosić równo 115 cm):**")
             
@@ -439,11 +654,9 @@ elif menu == "Moduł Production":
                     nr_knf_auto = f"PR-KNF/{data_dzis_str}/{st.session_state.konf_counter:03d}"
                     total_jumbo_to_cut = sum(item["ile_rolek"] for item in st.session_state.konf_koszyk)
                     
-                    # 1. Zdejmujemy Jumbo z magazynu
                     st.session_state.polprodukty.at[0, "Stan"] -= total_jumbo_to_cut
                     dodaj_ruch("RW (Półprod.)", nr_knf_auto, "Rolka Jumbo (115cm x 13mb)", total_jumbo_to_cut, "Konfekcja")
                     
-                    # 2. Akumulacja wyprodukowanych rolek
                     total_produced = {}
                     for item in st.session_state.konf_koszyk:
                         for idx, qty_per_roll in item["szablon"].items():
@@ -454,12 +667,10 @@ elif menu == "Moduł Production":
                                 else:
                                     total_produced[idx] = produced_qty
                                     
-                    # Dodajemy wyroby gotowe na stan magazynu
                     for idx, total_qty in total_produced.items():
                         st.session_state.produkty.at[idx, "Stan"] += total_qty
                         dodaj_ruch("PW (Gotowe)", nr_knf_auto, st.session_state.produkty.at[idx, "Wariant"], total_qty, "Konfekcja")
 
-                    # 3. Generowanie PDF Zlecenia
                     font_path, font_bold_path = pobierz_czcionki()
                     pdf = FPDF()
                     pdf.add_page()
