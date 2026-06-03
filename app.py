@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA Z LOKALNĄ PAMIĘCIĄ)
+# 1. INICJALIZACJA BAZY (WERSJA V48)
 # ==========================================
-if 'init_lokalna' not in st.session_state:
-    st.session_state.init_lokalna = True
+if 'init_v48' not in st.session_state:
+    st.session_state.init_v48 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -350,7 +350,6 @@ elif menu == "Zamówienia (ZK)":
                 font_path, font_bold_path = pobierz_czcionki()
                 pdf = FPDF()
                 pdf.add_page()
-                # DODANO: uni=True, co natychmiast naprawia problem UnicodeDecodeError
                 pdf.add_font("Roboto", "", font_path, uni=True)
                 pdf.add_font("Roboto", "B", font_bold_path, uni=True)
                 
@@ -377,7 +376,7 @@ elif menu == "Zamówienia (ZK)":
                         pdf.set_font("Roboto", "", 9)
                     pdf.ln(3)
                 
-                st.session_state.zk_pdf_do_pobrania = {"nazwa": "Zbiorcza_Lista_Zamowien.pdf", "data": bytes(pdf.output())}
+                st.session_state.zk_pdf_do_pobrania = {"nazwa": "Zbiorcza_Lista_Zamowien.pdf", "data": pdf.output(dest="S").encode("latin-1")}
                 st.rerun()
 
 # ==========================================
@@ -502,6 +501,7 @@ elif menu == "Moduł Production":
             "gotowe_do_auto": gotowe_do_auto
         }
 
+    # Powiadomienia operacyjne - ODPORNE NA BLOKADY
     if "plan_hali_do_pobrania" in st.session_state:
         st.success("Wygenerowano kompleksowy plan produkcji dla hali.")
         st.download_button(
@@ -634,7 +634,6 @@ elif menu == "Moduł Production":
                 font_path, font_bold_path = pobierz_czcionki()
                 pdf = FPDF()
                 pdf.add_page()
-                # DODANO: uni=True w fpdf, bez tego błąd UnicodeDecodeError
                 pdf.add_font("Roboto", "", font_path, uni=True)
                 pdf.add_font("Roboto", "B", font_bold_path, uni=True)
                 
@@ -718,7 +717,7 @@ elif menu == "Moduł Production":
                     pdf.set_font("Roboto", "", 10)
                     pdf.cell(0, 8, "Brak zaleceń oklejania na tę zmianę.", ln=1)
                 
-                st.session_state.plan_hali_do_pobrania = {"nazwa": "Plan_Dla_Hali.pdf", "data": bytes(pdf.output())}
+                st.session_state.plan_hali_do_pobrania = {"nazwa": "Plan_Dla_Hali.pdf", "data": pdf.output(dest="S").encode("latin-1")}
                 st.rerun()
 
     with tab1:
@@ -1120,7 +1119,6 @@ elif menu == "Wydanie Towaru (WZ)":
                             font_path, font_bold_path = pobierz_czcionki()
                             pdf = FPDF()
                             pdf.add_page()
-                            # DODANO: uni=True
                             pdf.add_font("Roboto", "", font_path, uni=True)
                             pdf.add_font("Roboto", "B", font_bold_path, uni=True)
                             
@@ -1216,10 +1214,7 @@ elif menu == "Wydanie Towaru (WZ)":
                             pdf.set_x(135)
                             pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
                             
-                            pdf_bytes = bytes(pdf.output())
-                            st.session_state.archiwum_wz_pdf.append({"id": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "kontrahent": wybrany_klient, "zamowienie": powiazanie_info, "pdf": pdf_bytes})
-                            
-                            st.session_state.wz_pdf_do_pobrania = {"nazwa": f"{nr_wz_auto.replace('/', '_')}.pdf", "data": pdf_bytes}
+                            st.session_state.wz_pdf_do_pobrania = {"nazwa": f"{nr_wz_auto.replace('/', '_')}.pdf", "data": pdf.output(dest="S").encode("latin-1")}
                             st.session_state.wz_koszyk = []
                             st.rerun()
 
@@ -1236,23 +1231,7 @@ elif menu == "Archiwum Dokumentów":
     
     with tab_arch_wz:
         st.subheader("Rejestr Dokumentów WZ")
-        if not st.session_state.archiwum_wz_pdf:
-            st.info("Brak wystawionych dokumentów WZ w bazie danych.")
-        else:
-            df_wz = pd.DataFrame(st.session_state.archiwum_wz_pdf)[["id", "data", "kontrahent", "zamowienie"]]
-            st.dataframe(df_wz, use_container_width=True, hide_index=True, column_config={"id":"Numer dokumentu", "data":"Data wystawienia", "kontrahent":"Odbiorca", "zamowienie": "Dotyczy ZK"})
-            
-            lista_wz_id = [item["id"] for item in st.session_state.archiwum_wz_pdf]
-            wybrane_wz_id = st.selectbox("Wybierz numer WZ do pobrania pliku PDF", lista_wz_id, key="sel_wz")
-            
-            wz_data_bytes = next(item["pdf"] for item in st.session_state.archiwum_wz_pdf if item["id"] == wybrane_wz_id)
-            st.download_button(
-                label=f"Pobierz dokument {wybrane_wz_id} (.pdf)",
-                data=wz_data_bytes,
-                file_name=f"{wybrane_wz_id.replace('/', '_')}.pdf",
-                mime="application/pdf",
-                key="btn_dl_wz"
-            )
+        st.info("Opcja tymczasowo wyłączona dla zachowania lokalnej pamięci. Do wglądu w Zdarzeniach Systemowych na Pulpicie Głównym.")
 
     with tab_arch_pz:
         st.subheader("Rejestr Dokumentów PZ")
