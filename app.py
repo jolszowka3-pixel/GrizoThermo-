@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V34)
+# 1. INICJALIZACJA BAZY (WERSJA V35)
 # ==========================================
-if 'init_v34' not in st.session_state:
-    st.session_state.init_v34 = True
+if 'init_v35' not in st.session_state:
+    st.session_state.init_v35 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -112,7 +112,7 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
 
-# CSS Corporate Style
+# CSS
 st.markdown("""
     <style>
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
@@ -401,10 +401,10 @@ elif menu == "Moduł Production":
     
     tab_plan, tab1, tab2 = st.tabs(["Planowanie Zapotrzebowania", "KROK 1: Maszyna Główna", "KROK 2: Konfekcja (Zlecenie)"])
     
-    # --- KROK 0: PLANOWANIE Z ZAMÓWIEN ---
+    # --- PLANOWANIE Z ZAMÓWIEŃ Z INTEGRACJĄ STANÓW JUMBO ---
     with tab_plan:
         st.subheader("Analiza Zapotrzebowania i Auto-Planer Cięcia")
-        st.write("System analizuje wszystkie **Oczekujące** zamówienia i porównuje je ze stanem magazynu wyrobów gotowych.")
+        st.write("System analizuje wszystkie oczekujące zamówienia, oblicza braki asortymentu i optymalizuje plan rozkroju wraz z wymogami dla maszyny głównej.")
         
         oczekujace = [z for z in st.session_state.zamowienia if z["Status"] == "Oczekujące"]
         if not oczekujace:
@@ -427,7 +427,7 @@ elif menu == "Moduł Production":
             if not braki:
                 st.success("Masz wystarczającą ilość produktów na magazynie, aby zrealizować wszystkie bieżące zamówienia.")
             else:
-                st.error("Wykryto braki asortymentu w stosunku do zamówień. Wymagane uruchomienie konfekcji.")
+                st.error("Wykryto braki asortymentu w stosunku do zamówień. Wymagane uruchomienie produkcji.")
                 df_braki = pd.DataFrame(braki)
                 st.dataframe(df_braki[["Wariant", "Brak_szt"]], use_container_width=True, hide_index=True)
                 
@@ -454,8 +454,14 @@ elif menu == "Moduł Production":
                             i += 1
                             
                     rem = 115 - used_cm
-                    while rem >= 10 and roll_count < 6:
-                        pad_w = 15 if (rem % 15 == 0 or rem >= 15) and rem != 20 else 10
+                    while rem > 0 and roll_count < 6:
+                        # Inteligentne dopełnianie odpadu większymi wymiarami
+                        if roll_count == 5:
+                            if rem in [10, 15, 20, 25, 30, 35]: pad_w = rem
+                            else: pad_w = 35 if rem >= 35 else (30 if rem>=30 else (25 if rem>=25 else (20 if rem>=20 else (15 if rem>=15 else 10))))
+                        else:
+                            pad_w = 35 if rem >= 35 else (30 if rem>=30 else (25 if rem>=25 else (20 if rem>=20 else (15 if rem>=15 else 10))))
+                        
                         pad_nazwa = f"GrizoThermo+ {pad_w}cm - Nieoklejona (13mb)"
                         rolka[pad_nazwa] = rolka.get(pad_nazwa, 0) + 1
                         rem -= pad_w
@@ -463,13 +469,34 @@ elif menu == "Moduł Production":
                         
                     plan_rolek.append(rolka)
                 
-                st.subheader("Zoptymalizowany Sugerowany Plan Cięcia (Zasada: Max 6 rolek z 1 Jumbo, Zero Odpadu)")
-                st.write(f"Do pokrycia braków potrzeba pociąć: **{len(plan_rolek)} szt. rolek Jumbo**.")
-                
+                potrzeba_jumbo_calkowita = len(plan_rolek)
                 s_jumbo_akt = int(st.session_state.polprodukty.at[0, "Stan"])
-                if s_jumbo_akt < len(plan_rolek):
-                    st.warning(f"Posiadasz tylko {s_jumbo_akt} rolek Jumbo na magazynie. Musisz najpierw wytłoczyć brakujące {len(plan_rolek) - s_jumbo_akt} szt.")
-                
+                brakuje_jumbo = max(0, potrzeba_jumbo_calkowita - s_jumbo_akt)
+
+                st.subheader("Bilanse Wytłaczarki i Surowców (KROK 1)")
+                st.write(f"Do pocięcia potrzebujesz łącznie: **{potrzeba_jumbo_calkowita} szt. rolek Jumbo**.")
+                st.write(f"Twój aktualny stan rolek Jumbo: **{s_jumbo_akt} szt.**")
+
+                if brakuje_jumbo > 0:
+                    st.warning(f"Zlecenia wymagają wytłoczenia dodatkowych **{brakuje_jumbo} szt.** rolek Jumbo na Maszynie Głównej.")
+                    
+                    req_alu = brakuje_jumbo * st.session_state.receptura_baza["K01"]
+                    req_bia = brakuje_jumbo * st.session_state.receptura_baza["K02"]
+                    req_zie = brakuje_jumbo * st.session_state.receptura_baza["K03"]
+                    
+                    stan_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
+                    stan_bia = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K02", "Stan"].values[0]
+                    stan_zie = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K03", "Stan"].values[0]
+                    
+                    if stan_alu >= req_alu and stan_bia >= req_bia and stan_zie >= req_zie:
+                        st.success("Magazyn surowców w pełni pokrywa zapotrzebowanie na wytłoczenie tych rolek.")
+                    else:
+                        st.error("BRAK SUROWCÓW do wytłoczenia potrzebnych rolek Jumbo! Należy wystawić zapotrzebowanie dla dostawców.")
+                else:
+                    st.success("Posiadasz wystarczającą ilość rolek Jumbo na magazynie, aby przejść od razu do konfekcji.")
+
+                st.write("")
+                st.subheader("Zoptymalizowany Plan Konfekcji (KROK 2)")
                 zliczone_szablony = {}
                 for r in plan_rolek:
                     klucz = str(dict(sorted(r.items())))
@@ -499,7 +526,7 @@ elif menu == "Moduł Production":
                     pdf.ln(6)
                     
                     pdf.set_font("Roboto", "B", 11)
-                    pdf.cell(0, 6, "1. ZESTAWIENIE BRAKÓW ASORTYMENTOWYCH", border="B", ln=1)
+                    pdf.cell(0, 6, "1. ZESTAWIENIE BRAKÓW ASORTYMENTOWYCH (GOTOWE)", border="B", ln=1)
                     pdf.ln(2)
                     pdf.set_font("Roboto", "B", 9)
                     pdf.cell(140, 8, "Asortyment wymagający uzupełnienia", border=1, align='L')
@@ -511,9 +538,24 @@ elif menu == "Moduł Production":
                         
                     pdf.ln(8)
                     pdf.set_font("Roboto", "B", 11)
-                    pdf.cell(0, 6, "2. OPTYMALNY PLAN ROZKROJU ROLEK JUMBO", border="B", ln=1)
+                    pdf.cell(0, 6, "2. PLAN PRODUKCJI - WYTŁACZANIE JUMBO (KROK 1)", border="B", ln=1)
                     pdf.set_font("Roboto", "", 10)
-                    pdf.cell(0, 8, f"Wymagane zmagazynowanie i pocięcie: {len(plan_rolek)} szt. rolek Jumbo (115cm).", ln=1)
+                    pdf.cell(0, 8, f"Stan magazynowy Jumbo: {s_jumbo_akt} szt.  |  Całkowite zapotrzebowanie: {potrzeba_jumbo_calkowita} szt.", ln=1)
+                    pdf.cell(0, 8, f"Do wyprodukowania: {brakuje_jumbo} szt. rolek Jumbo.", ln=1)
+                    
+                    if brakuje_jumbo > 0:
+                        pdf.set_font("Roboto", "B", 9)
+                        pdf.cell(0, 6, "Wymagane zużycie surowców dla wskazanej produkcji:", ln=1)
+                        pdf.set_font("Roboto", "", 9)
+                        pdf.cell(0, 6, f"- Aluminium zbrojone 1,15m: {req_alu:g} mb", ln=1)
+                        pdf.cell(0, 6, f"- Barwnik biały: {req_bia:g} kg", ln=1)
+                        pdf.cell(0, 6, f"- Barwnik zielony: {req_zie:g} kg", ln=1)
+
+                    pdf.ln(8)
+                    pdf.set_font("Roboto", "B", 11)
+                    pdf.cell(0, 6, "3. OPTYMALNY PLAN ROZKROJU ROLEK JUMBO (KROK 2)", border="B", ln=1)
+                    pdf.set_font("Roboto", "", 10)
+                    pdf.cell(0, 8, f"Wymagane pobranie i pocięcie: {potrzeba_jumbo_calkowita} szt. rolek Jumbo (115cm).", ln=1)
                     pdf.ln(2)
                     
                     for i, (_, dane) in enumerate(zliczone_szablony.items()):
