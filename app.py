@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V38)
+# 1. INICJALIZACJA BAZY (WERSJA V39 - CZYSZCZENIE RAM)
 # ==========================================
-if 'init_v38' not in st.session_state:
-    st.session_state.init_v38 = True
+if 'init_v39' not in st.session_state:
+    st.session_state.init_v39 = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -265,13 +265,17 @@ elif menu == "Zamówienia (ZK)":
     
     if "lista_zamowien_pdf" in st.session_state:
         st.success("Wygenerowano zbiorczą listę zamówień.")
-        st.download_button(
+        col_dl1, col_dl2 = st.columns([3, 1])
+        col_dl1.download_button(
             label="Pobierz Zbiorczą Listę Zamówień (.pdf)",
             data=st.session_state.lista_zamowien_pdf,
             file_name="Zbiorcza_Lista_Zamowien.pdf",
             mime="application/pdf",
             use_container_width=True
         )
+        if col_dl2.button("Zamknij powiadomienie", use_container_width=True, key="close_zk_list"):
+            del st.session_state.lista_zamowien_pdf
+            st.rerun()
         st.divider()
 
     tab_nowe, tab_lista, tab_wydruk = st.tabs(["Wprowadź Nowe Zamówienie", "Rejestr Zamówień", "Generuj Listę (PDF)"])
@@ -501,29 +505,41 @@ elif menu == "Moduł Production":
     # Powiadomienia operacyjne
     if "ostatnia_produkcja_pdf" in st.session_state:
         st.success(f"Zaksięgowano pomyślnie akcję na hali.")
-        st.download_button(
+        c1, c2 = st.columns([3, 1])
+        c1.download_button(
             label="Pobierz wygenerowany dokument ostatniej akcji (.pdf)",
             data=st.session_state.ostatnia_produkcja_pdf,
             file_name=st.session_state.nazwa_pliku_produkcji,
             mime="application/pdf",
             use_container_width=True
         )
+        if c2.button("Zamknij powiadomienie", use_container_width=True, key="close_prod_pdf"):
+            del st.session_state.ostatnia_produkcja_pdf
+            del st.session_state.nazwa_pliku_produkcji
+            st.rerun()
         st.divider()
 
     if "ostatni_raport_zk_pdf" in st.session_state:
         st.success("Wygenerowano kompleksowy plan produkcji dla hali.")
-        st.download_button(
+        c1, c2 = st.columns([3, 1])
+        c1.download_button(
             label="Pobierz Dzienny Plan dla Operatorów (.pdf)",
             data=st.session_state.ostatni_raport_zk_pdf,
             file_name="Plan_Dla_Hali.pdf",
             mime="application/pdf",
             use_container_width=True
         )
+        if c2.button("Zamknij powiadomienie", use_container_width=True, key="close_plan_pdf"):
+            del st.session_state.ostatni_raport_zk_pdf
+            st.rerun()
         st.divider()
         
     if "auto_success" in st.session_state:
         st.success(st.session_state.auto_success)
-        del st.session_state.auto_success
+        if st.button("Ukryj potwierdzenie"):
+            del st.session_state.auto_success
+            st.rerun()
+        st.divider()
     
     # ----------------------------------------------------
     # NOWY PODZIAŁ ZAKŁADEK (WYDRUK WYDZIELONY)
@@ -843,6 +859,8 @@ elif menu == "Moduł Production":
                     st.session_state.ostatnia_produkcja_pdf = pdf_bytes
                     st.session_state.nazwa_pliku_produkcji = f"{nr_jmb_auto.replace('/', '_')}.pdf"
                     st.rerun()
+        else:
+            st.error("Brak wystarczających surowców na pełną rolkę Jumbo.")
 
     # --- KROK 2 (RĘCZNY) ---
     with tab2:
@@ -896,7 +914,7 @@ elif menu == "Moduł Production":
                             })
                             st.rerun()
             elif laczna_ilosc_rolek > 6:
-                st.error(f"Błąd techniczny: Szablon zawiera {laczna_ilosc_rolek} rolek. Maksymalna wydajność to 6 noży.")
+                st.error(f"Błąd techniczny: Szablon zawiera {laczna_ilosc_rolek} rolek. Maksymalna techniczna wydajność to 6 noży.")
             elif zuzyte_cm > 115:
                 st.error(f"Przekroczyłeś wymiar rolki bazowej o {zuzyte_cm - 115} cm!")
             elif zuzyte_cm > 0:
@@ -1170,13 +1188,18 @@ elif menu == "Wydanie Towaru (WZ)":
     
     if "wygenerowane_pdf" in st.session_state:
         st.success(f"Zaksięgowano dokument: {st.session_state.nazwa_pliku_wz}")
-        st.download_button(
+        c1, c2 = st.columns([3, 1])
+        c1.download_button(
             label="Pobierz dokument WZ (.pdf)", 
             data=st.session_state.wygenerowane_pdf, 
             file_name=st.session_state.nazwa_pliku_wz, 
             mime="application/pdf", 
             use_container_width=True
         )
+        if c2.button("Zamknij powiadomienie", use_container_width=True, key="close_wz_pdf"):
+            del st.session_state.wygenerowane_pdf
+            del st.session_state.nazwa_pliku_wz
+            st.rerun()
         st.divider()
         
     if not odbiorcy:
