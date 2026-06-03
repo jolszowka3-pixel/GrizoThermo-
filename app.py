@@ -37,10 +37,10 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V47)
+# 1. INICJALIZACJA BAZY (WERSJA Z LOKALNĄ PAMIĘCIĄ)
 # ==========================================
-if 'init_v47' not in st.session_state:
-    st.session_state.init_v47 = True
+if 'init_lokalna' not in st.session_state:
+    st.session_state.init_lokalna = True
     st.session_state.wz_counter = 1
     st.session_state.jumbo_counter = 1
     st.session_state.konf_counter = 1
@@ -350,8 +350,9 @@ elif menu == "Zamówienia (ZK)":
                 font_path, font_bold_path = pobierz_czcionki()
                 pdf = FPDF()
                 pdf.add_page()
-                pdf.add_font("Roboto", "", font_path)
-                pdf.add_font("Roboto", "B", font_bold_path)
+                # DODANO: uni=True, co natychmiast naprawia problem UnicodeDecodeError
+                pdf.add_font("Roboto", "", font_path, uni=True)
+                pdf.add_font("Roboto", "B", font_bold_path, uni=True)
                 
                 pdf.set_fill_color(240, 240, 240)
                 pdf.set_font("Roboto", "B", 14)
@@ -501,7 +502,6 @@ elif menu == "Moduł Production":
             "gotowe_do_auto": gotowe_do_auto
         }
 
-    # Powiadomienia operacyjne - ODPORNE NA BLOKADY
     if "plan_hali_do_pobrania" in st.session_state:
         st.success("Wygenerowano kompleksowy plan produkcji dla hali.")
         st.download_button(
@@ -634,8 +634,9 @@ elif menu == "Moduł Production":
                 font_path, font_bold_path = pobierz_czcionki()
                 pdf = FPDF()
                 pdf.add_page()
-                pdf.add_font("Roboto", "", font_path)
-                pdf.add_font("Roboto", "B", font_bold_path)
+                # DODANO: uni=True w fpdf, bez tego błąd UnicodeDecodeError
+                pdf.add_font("Roboto", "", font_path, uni=True)
+                pdf.add_font("Roboto", "B", font_bold_path, uni=True)
                 
                 pdf.set_fill_color(240, 240, 240)
                 pdf.set_font("Roboto", "B", 15)
@@ -1119,8 +1120,9 @@ elif menu == "Wydanie Towaru (WZ)":
                             font_path, font_bold_path = pobierz_czcionki()
                             pdf = FPDF()
                             pdf.add_page()
-                            pdf.add_font("Roboto", "", font_path)
-                            pdf.add_font("Roboto", "B", font_bold_path)
+                            # DODANO: uni=True
+                            pdf.add_font("Roboto", "", font_path, uni=True)
+                            pdf.add_font("Roboto", "B", font_bold_path, uni=True)
                             
                             pdf.set_fill_color(240, 240, 240)
                             pdf.set_font("Roboto", "B", 15)
@@ -1292,21 +1294,34 @@ elif menu == "Panel Administracyjny":
     with tab_uzytkownicy:
         st.write("Wprowadź dane, aby wygenerować profil pracownika.")
         with st.form("dodaj_uzytkownika"):
-            c1, c2 = st.columns(2)
-            login = c1.text_input("Login")
-            imie = c1.text_input("Imię i Nazwisko")
-            haslo = c1.text_input("Hasło startowe", type="password")
-            
-            u_prod = c2.checkbox("Moduł Produkcji")
-            u_pz = c2.checkbox("Przyjęcia PZ")
-            u_wz = c2.checkbox("Wydania WZ oraz CRM")
-            u_admin = c2.checkbox("Panel Administracyjny")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                login = st.text_input("Login")
+                imie = st.text_input("Imię i Nazwisko")
+                haslo = st.text_input("Hasło startowe", type="password")
+            with c2:
+                st.write("**Moduły operacyjne:**")
+                u_pulpit = st.checkbox("Pulpit Główny", value=True)
+                u_mag = st.checkbox("Stan Magazynu", value=True)
+                u_zk = st.checkbox("Zamówienia (ZK)")
+                u_prod = st.checkbox("Moduł Production")
+                u_pz = st.checkbox("Przyjęcie Towaru (PZ)")
+            with c3:
+                st.write("**Moduły zarządcze:**")
+                u_wz = st.checkbox("Wydanie Towaru (WZ)")
+                u_crm = st.checkbox("Baza Kontrahentów (CRM)")
+                u_arch = st.checkbox("Archiwum Dokumentów")
+                u_admin = st.checkbox("Panel Administracyjny")
             
             if st.form_submit_button("Utwórz konto"):
                 if login and haslo and imie:
                     st.session_state.uzytkownicy[login.strip()] = {
                         "haslo": haslo, "imie": imie,
-                        "uprawnienia": {"produkcja": u_prod, "pz": u_pz, "wz": u_wz, "admin": u_admin}
+                        "uprawnienia": {
+                            "pulpit": u_pulpit, "magazyn": u_mag, "zk": u_zk, 
+                            "produkcja": u_prod, "pz": u_pz, "wz": u_wz, 
+                            "crm": u_crm, "archiwum": u_arch, "admin": u_admin
+                        }
                     }
                     st.success("Konto zostało pomyślnie utworzone.")
                     st.rerun()
