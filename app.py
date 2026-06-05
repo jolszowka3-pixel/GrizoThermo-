@@ -253,7 +253,6 @@ if st.session_state.aktualne_uprawnienia.get("pz"): opcje.append("Przyjęcie Tow
 if st.session_state.aktualne_uprawnienia.get("wz"): opcje.append("Wydanie Towaru (WZ)")
 if st.session_state.aktualne_uprawnienia.get("pz") or st.session_state.aktualne_uprawnienia.get("wz"):
     opcje.append("Baza Kontrahentów (CRM)")
-# POPRAWKA: Przywrócono widoczność panelu administracyjnego w menu dla uprawnionych kont
 if st.session_state.aktualne_uprawnienia.get("admin"): 
     opcje.append("Panel Administracyjny")
 
@@ -270,7 +269,7 @@ if menu == "Pulpit Główny":
     stan_jumbo = int(st.session_state.polprodukty.loc[0, "Stan"])
     stan_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
     
-    oczekujace_zk = len([z for z in st.session_state.zamowienia if z["Status"] in ["Czeka na realizację", "W knittingu", "W produkcji", "Gotowe do wydania"]])
+    oczekujace_zk = len([z for z in st.session_state.zamowienia if z["Status"] in ["Czeka na realizację", "W produkcji", "Gotowe do wydania"]])
 
     col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
     col_kpi1.metric("WYROBY GOTOWE (SUMA)", f"{suma_gotowych} szt.")
@@ -1101,17 +1100,24 @@ elif menu == "Przyjęcie Towaru (PZ)":
                     idx = st.session_state.komponenty.index[st.session_state.komponenty["Nazwa"] == k][0]
                     st.session_state.komponenty.at[idx, "Stan"] += i
                     dodaj_ruch("PZ", n, k, i, d)
-                    st.success("Zapisano przyjęcie zewnętrzne.")
+                    st.success("Zapisano przyjęcie zewnętrzne i zaktualizowano stany surowców.")
                     st.rerun()
                     
     with tab_rejestr_pz:
+        st.subheader("Historia przyjęć surowców")
         df_pz = st.session_state.historia[st.session_state.historia["Typ"] == "PZ"]
         if not df_pz.empty:
-            st.dataframe(df_pz.sort_values(by="Data", ascending=False), use_container_width=True, hide_index=True)
-        else: st.info("Brak zarejestrowanych dokumentów PZ.")
+            st.dataframe(
+                df_pz.sort_values(by="Data", ascending=False),
+                use_container_width=True, hide_index=True,
+                column_config={"Data":"Data przyjęcia", "Dokument":"Numer PZ", "Produkt/Surowiec":"Surowiec", "Ilosc":"Ilość", "Kontrahent":"Dostawca"}
+            )
+        else:
+            st.info("Brak zarejestrowanych dokumentów PZ w bazie.")
 
 elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
+    
     tab_nowe_wz, tab_rejestr_wz = st.tabs(["Wprowadź Dokument WZ", "🗂️ Rejestr Dokumentów WZ / Ponowny Wydruk"])
     
     with tab_nowe_wz:
@@ -1124,7 +1130,7 @@ elif menu == "Wydanie Towaru (WZ)":
                 st.rerun()
             st.divider()
             
-        if not odbiorcy: st.warning("Brak odbiorców w CRM.")
+        if not odbiorcy: st.warning("Brak odbiorców w bazie danych CRM.")
         else:
             st.subheader("1. Realizacja Zamówienia (Wczytanie z produkcji)")
             oczekujace_zk = [z for z in st.session_state.zamowienia if z["Status"] == "Gotowe do wydania"]
@@ -1141,10 +1147,11 @@ elif menu == "Wydanie Towaru (WZ)":
                             st.session_state.powiazane_zk = z["id"]
                             st.session_state.wz_koszyk = [{"Wariant": p["Wariant"], "Ilosc": p["Ilość (szt.)"]} for p in z["pozycje"]]
                             st.rerun()
-            else: st.info("Brak wyprodukowanych zamówień oczekujących na wydanie.")
+            else: st.info("Brak wyprodukowanych zamówień oczekujących na wydanie. Możesz też wystawić WZ ręcznie z wolnego asortymentu.")
+            
             st.divider()
             dostepne_produkty = st.session_state.produkty[st.session_state.produkty["Stan"] > 0].copy()
-            if dostepne_produkty.empty and not st.session_state.wz_koszyk: st.error("Brak gotowych produktów na magazynie!")
+            if dostepne_produkty.empty and not st.session_state.wz_koszyk: st.error("Brak gotowych produktów na magazynie! Wymagana konfekcja i odbiór z hali.")
             else:
                 data_dzis_str = datetime.now().strftime("%Y/%m/%d")
                 nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
@@ -1152,7 +1159,7 @@ elif menu == "Wydanie Towaru (WZ)":
                 col_f1, col_f2 = st.columns(2)
                 with col_f1:
                     idx_klienta = odbiorcy.index(st.session_state.wybrany_klient_wz) if st.session_state.wybrany_klient_wz in odbiorcy else 0
-                    wybrany_klient = st.selectbox("Nabywca", odbiorcy, index=idx_klienta)
+                    wybrany_klient = st.selectbox("Nabywca (Wybierz z bazy)", odbiorcy, index=idx_klienta)
                     st.session_state.wybrany_klient_wz = wybrany_klient
                 with col_f2: uwagi_doc = st.text_input("Uwagi do dokumentu", value="Dostawa z magazynu głównego.")
                 st.divider()
@@ -1212,20 +1219,25 @@ elif menu == "Wydanie Towaru (WZ)":
                                     st.session_state.produkty.at[idx, "Stan"] -= ile_w
                                     dodaj_ruch("WZ", nr_wz_auto, nazwa_w, ile_w, wybrany_klient)
                                 
+                                _pozycja_kopia = st.session_state.wz_koszyk.copy()
+                                
                                 st.session_state.rejestr_wz.append({
                                     "nr_wz": nr_wz_auto,
                                     "data": datetime.now().strftime("%Y-%m-%d %H:%M"),
                                     "klient_nazwa": wybrany_klient,
                                     "klient_adres": klient_adres,
                                     "klient_nip": klient_nip,
-                                    "pozycje":_pozycja_kopia := st.session_state.wz_koszyk.copy(),
+                                    "pozycje": _pozycja_kopia,
                                     "uwagi": uwagi_doc
                                 })
                                 
                                 st.session_state.wz_counter += 1
+                                
                                 if st.session_state.powiazane_zk:
                                     for zmw in st.session_state.zamowienia:
-                                        if zmw["id"] == st.session_state.powiazane_zk: zmw["Status"] = "Zrealizowane"; break
+                                        if zmw["id"] == st.session_state.powiazane_zk: 
+                                            zmw["Status"] = "Zrealizowane"
+                                            break
                                     st.session_state.powiazane_zk = None
                                 
                                 pdf_data = generuj_wz_pdf(nr_wz_auto, datetime.now().strftime("%Y-%m-%d"), wybrany_klient, klient_adres, klient_nip, _pozycja_kopia, uwagi_doc)
@@ -1235,20 +1247,38 @@ elif menu == "Wydanie Towaru (WZ)":
 
     with tab_rejestr_wz:
         st.subheader("Archiwum wystawionych dokumentów WZ")
-        if not st.session_state.rejestr_wz: st.info("Nie wystawiono jeszcze żadnego dokumentu WZ.")
+        if not st.session_state.rejestr_wz:
+            st.info("Nie wystawiono jeszcze żadnego dokumentu WZ w tej sesji.")
         else:
             for dokument in reversed(st.session_state.rejestr_wz):
                 with st.expander(f"📄 Dokument: {dokument['nr_wz']} | Klient: {dokument['klient_nazwa']} | Data: {dokument['data']}"):
                     st.write(f"**Adres:** {dokument['klient_adres']} | **NIP:** {dokument['klient_nip']}")
-                    if dokument["uwagi"]: st.write(f"**Uwagi:** {dokument['uwagi']}")
-                    st.dataframe(pd.DataFrame(dokument["pozycje"]), hide_index=True, use_container_width=True)
+                    if dokument["uwagi"]:
+                        st.write(f"**Uwagi:** {dokument['uwagi']}")
                     
-                    pdf_ponowny = generuj_wz_pdf(dokument['nr_wz'], dokument['data'].split(" ")[0], dokument['klient_nazwa'], dokument['klient_adres'], dokument['klient_nip'], dokument['pozycje'], dokument['uwagi'])
-                    st.download_button(label=f"📥 Pobierz ponownie PDF dla {dokument['nr_wz']}", data=pdf_ponowny, file_name=f"Kopia_{dokument['nr_wz'].replace('/', '_')}.pdf", mime="application/pdf", key=f"reprint_{dokument['nr_wz']}")
+                    st.write("**Lista wydanych produktów:**")
+                    df_doc_pos = pd.DataFrame(dokument["pozycje"])
+                    df_doc_pos.columns = ["Nazwa asortymentu", "Ilość (szt.)"]
+                    st.dataframe(df_doc_pos, hide_index=True, use_container_width=True)
+                    
+                    pdf_ponowny = generuj_wz_pdf(
+                        dokument['nr_wz'], 
+                        dokument['data'].split(" ")[0], 
+                        dokument['klient_nazwa'], 
+                        dokument['klient_adres'], 
+                        dokument['klient_nip'], 
+                        dokument['pozycje'], 
+                        dokument['uwagi']
+                    )
+                    
+                    st.download_button(
+                        label=f"📥 Pobierz ponownie PDF dla {dokument['nr_wz']}",
+                        data=pdf_ponowny,
+                        file_name=f"Kopia_{dokument['nr_wz'].replace('/', '_')}.pdf",
+                        mime="application/pdf",
+                        key=f"reprint_{dokument['nr_wz']}"
+                    )
 
-# ==========================================
-# POPRAWKA: PRZYWRÓCONY I ROZBUDOWANY PANEL ADMINISTRACYJNY
-# ==========================================
 elif menu == "Panel Administracyjny":
     st.header("Panel Administracyjny Systemu")
     st.write("Zarządzaj dostępem użytkowników do zakładek oraz przeprowadzaj ręczną korektę stanów magazynowych w czasie rzeczywistym.")
@@ -1313,11 +1343,9 @@ elif menu == "Panel Administracyjny":
         st.subheader("Ręczna Korekta Stanu Surowców i Półproduktów")
         st.write("Zmodyfikuj wartości w kolumnie **'Stan'**, a następnie kliknij przycisk poniżej tabeli, aby zapisać zmiany.")
         
-        # Edycja komponentów bazowych
         st.markdown("**Magazyn Surowców Głównego Planera:**")
         zm_k = st.data_editor(st.session_state.komponenty, hide_index=True, use_container_width=True, key="admin_edit_komp")
         
-        # Edycja półproduktu Jumbo (dla zachowania 100% spójności ze stanem asortymentu)
         st.markdown("**Magazyn Półproduktów (Rolki Jumbo 115cm):**")
         zm_j = st.data_editor(st.session_state.polprodukty, hide_index=True, use_container_width=True, key="admin_edit_jumbo")
         
