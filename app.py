@@ -14,10 +14,10 @@ st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # ==========================================
-# FUNKCJE CHMUROWE (ODCZYT / AUTOMATYCZNA INICJALIZACJA BAZY GOOGLE)
+# FUNKCJE CHMUROWE (ODCZYT / BEZPIECZNA INICJALIZACJA BAZY GOOGLE)
 # ==========================================
 def zaladuj_lub_inicjalizuj_baze():
-    """Pobiera dane z chmury. Jeśli arkusz jest całkiem pusty, sam tworzy zakładki i nagłówki."""
+    """Pobiera dane z chmury. W przypadku pustych arkuszy ładuje bazę do pamięci (bez spamu do API)."""
     
     # 1. Zakładka: Uzytkownicy
     try:
@@ -28,7 +28,6 @@ def zaladuj_lub_inicjalizuj_baze():
             "Login": "admin", "Haslo": "admin123", "Imie": "Kierownik Magazynu",
             "pulpit": True, "magazyn": True, "zk": True, "produkcja": True, "pz": True, "wz": True, "crm": True, "admin": True
         }])
-        conn.update(worksheet="Uzytkownicy", data=df_uz)
     
     uzytkownicy_dict = {}
     for _, row in df_uz.iterrows():
@@ -47,41 +46,39 @@ def zaladuj_lub_inicjalizuj_baze():
     try:
         df_kon = conn.read(worksheet="Kontrahenci", ttl=0)
         if df_kon.empty or "Nazwa" not in df_kon.columns: raise Exception()
+        st.session_state.kontrahenci = df_kon
     except:
-        df_kon = pd.DataFrame([
+        st.session_state.kontrahenci = pd.DataFrame([
             {"Nazwa": "Hurtownia Surowców ALUSTAR", "NIP": "1112223344", "Adres": "ul. Hutnicza 10, 40-001 Katowice", "Typ": "Dostawca"},
             {"Nazwa": "Chemia Przemysłowa Sp. z o.o.", "NIP": "9998887766", "Adres": "ul. Barwna 5, 01-234 Warszawa", "Typ": "Dostawca"},
             {"Nazwa": "Bud-Max Materiały Budowlane", "NIP": "5554443322", "Adres": "ul. Wrocławska 100, 30-001 Kraków", "Typ": "Odbiorca"}
         ])
-        conn.update(worksheet="Kontrahenci", data=df_kon)
-    st.session_state.kontrahenci = df_kon
 
     # 3. Zakładka: Komponenty (Surowce)
     try:
         df_komp = conn.read(worksheet="Komponenty", ttl=0)
         if df_komp.empty or "ID" not in df_komp.columns: raise Exception()
+        st.session_state.komponenty = df_komp
     except:
-        df_komp = pd.DataFrame([
+        st.session_state.komponenty = pd.DataFrame([
             {"ID": "K01", "Nazwa": "Aluminium zbrojone 1,15m", "Stan": 3200.0, "Jednostka": "mb"},
             {"ID": "K02", "Nazwa": "Barwnik biały", "Stan": 15.0, "Jednostka": "kg"},
             {"ID": "K03", "Nazwa": "Barwnik zielony", "Stan": 12.0, "Jednostka": "kg"}
         ])
-        conn.update(worksheet="Komponenty", data=df_komp)
-    st.session_state.komponenty = df_komp
 
     # 4. Zakładka: Polprodukty
     try:
         df_pol = conn.read(worksheet="Polprodukty", ttl=0)
         if df_pol.empty or "ID" not in df_pol.columns: raise Exception()
+        st.session_state.polprodukty = df_pol
     except:
-        df_pol = pd.DataFrame([{"ID": "P01", "Nazwa": "Rolka Jumbo (115cm x 13mb)", "Stan": 0, "Jednostka": "szt."}])
-        conn.update(worksheet="Polprodukty", data=df_pol)
-    st.session_state.polprodukty = df_pol
+        st.session_state.polprodukty = pd.DataFrame([{"ID": "P01", "Nazwa": "Rolka Jumbo (115cm x 13mb)", "Stan": 0, "Jednostka": "szt."}])
 
     # 5. Zakładka: Produkty (Wyroby gotowe)
     try:
         df_prod = conn.read(worksheet="Produkty", ttl=0)
         if df_prod.empty or "Wariant" not in df_prod.columns: raise Exception()
+        st.session_state.produkty = df_prod
     except:
         szerokosci = [10, 15, 20, 25, 30, 35, 115]
         warianty_wykonczenia = ["Oklejona", "Nieoklejona"]
@@ -89,18 +86,15 @@ def zaladuj_lub_inicjalizuj_baze():
         for szer in szerokosci:
             for war in warianty_wykonczenia:
                 produkty_list.append({"Wariant": f"GrizoThermo+ {szer}cm - {war} (13mb)", "Stan": 0, "Szerokosc": szer})
-        df_prod = pd.DataFrame(produkty_list)
-        conn.update(worksheet="Produkty", data=df_prod)
-    st.session_state.produkty = df_prod
+        st.session_state.produkty = pd.DataFrame(produkty_list)
 
-    # 6. Zakładka: Historia (Kluczowa poprawka)
+    # 6. Zakładka: Historia
     try:
         df_hist = conn.read(worksheet="Historia", ttl=0)
         if df_hist.empty or "Typ" not in df_hist.columns: raise Exception()
+        st.session_state.historia = df_hist
     except:
-        df_hist = pd.DataFrame(columns=["Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"])
-        conn.update(worksheet="Historia", data=df_hist)
-    st.session_state.historia = df_hist
+        st.session_state.historia = pd.DataFrame(columns=["Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"])
 
     # 7. Zakładka: Zamowienia
     try:
@@ -117,8 +111,6 @@ def zaladuj_lub_inicjalizuj_baze():
         st.session_state.zamowienia = zam_list
     except:
         st.session_state.zamowienia = []
-        df_dummy = pd.DataFrame(columns=["ID", "Data", "Klient", "Pozycje", "Uwagi", "Status"])
-        conn.update(worksheet="Zamowienia", data=df_dummy)
 
     # 8. Zakładka: ZleceniaProdukcyjne (Karta pracy Kroku 4)
     try:
@@ -137,8 +129,6 @@ def zaladuj_lub_inicjalizuj_baze():
         st.session_state.zlecenia_produkcyjne = zl_list
     except:
         st.session_state.zlecenia_produkcyjne = []
-        df_dummy = pd.DataFrame(columns=["ID", "Data", "MrpSnap", "ZamowieniaPowiazane", "Status"])
-        conn.update(worksheet="ZleceniaProdukcyjne", data=df_dummy)
 
     # 9. Zakładka: RejestrWZ
     try:
@@ -155,10 +145,8 @@ def zaladuj_lub_inicjalizuj_baze():
         st.session_state.rejestr_wz = rwz_list
     except:
         st.session_state.rejestr_wz = []
-        df_dummy = pd.DataFrame(columns=["NrWz", "Data", "KlientNazwa", "KlientAdres", "KlientNip", "Pozycje", "Uwagi"])
-        conn.update(worksheet="RejestrWZ", data=df_dummy)
 
-    # Bezpieczne przeliczenie liczników operacyjnych
+    # Bezpieczne przeliczenie liczników operacyjnych z chmury
     st.session_state.zk_counter = len(st.session_state.zamowienia) + 1
     st.session_state.wz_counter = len(st.session_state.rejestr_wz) + 1
     st.session_state.pr_counter = len(st.session_state.zlecenia_produkcyjne) + 1
@@ -171,7 +159,6 @@ def zaladuj_lub_inicjalizuj_baze():
         st.session_state.jumbo_counter = 1
         st.session_state.konf_counter = 1
         st.session_state.okl_counter = 1
-
 
 def zapisz_tabele_w_chmurze(nazwa_tabeli):
     """Wysyła zaktualizowane dane z sesji bezpośrednio do Arkusza Google"""
@@ -208,7 +195,9 @@ def zapisz_tabele_w_chmurze(nazwa_tabeli):
                     "ID": z["id"], "Data": z["data"], "Klient": z["klient"],
                     "Pozycje": json.dumps(z["pozycje"]), "Uwagi": z["uwagi"], "Status": z["Status"]
                 })
-            conn.update(worksheet="Zamowienia", data=pd.DataFrame(rows))
+            # Jeśli lista jest pusta, tworzymy pusty DataFrame z poprawnymi nagłówkami
+            df_to_save = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["ID", "Data", "Klient", "Pozycje", "Uwagi", "Status"])
+            conn.update(worksheet="Zamowienia", data=df_to_save)
         elif nazwa_tabeli == "ZleceniaProdukcyjne":
             rows = []
             for j in st.session_state.zlecenia_produkcyjne:
@@ -216,7 +205,8 @@ def zapisz_tabele_w_chmurze(nazwa_tabeli):
                     "ID": j["id"], "Data": j["data"], "MrpSnap": json.dumps(j["mrp_snap"]),
                     "ZamowieniaPowiazane": json.dumps(j["zamowienia_powiazane"]), "Status": j["status"]
                 })
-            conn.update(worksheet="ZleceniaProdukcyjne", data=pd.DataFrame(rows))
+            df_to_save = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["ID", "Data", "MrpSnap", "ZamowieniaPowiazane", "Status"])
+            conn.update(worksheet="ZleceniaProdukcyjne", data=df_to_save)
         elif nazwa_tabeli == "RejestrWZ":
             rows = []
             for d in st.session_state.rejestr_wz:
@@ -224,10 +214,10 @@ def zapisz_tabele_w_chmurze(nazwa_tabeli):
                     "NrWz": d["nr_wz"], "Data": d["data"], "KlientNazwa": d["klient_nazwa"],
                     "KlientAdres": d["klient_adres"], "KlientNip": d["klient_nip"], "Pozycje": json.dumps(d["pozycje"]), "Uwagi": d["uwagi"]
                 })
-            conn.update(worksheet="RejestrWZ", data=pd.DataFrame(rows))
+            df_to_save = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["NrWz", "Data", "KlientNazwa", "KlientAdres", "KlientNip", "Pozycje", "Uwagi"])
+            conn.update(worksheet="RejestrWZ", data=df_to_save)
     except Exception as e:
         st.error(f"Błąd zapisu w chmurze (Tabela: {nazwa_tabeli}): {e}")
-
 
 # ==========================================
 # DANE TWOJEJ FIRMY
@@ -339,9 +329,8 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-# ZMIANA: init_v50 w celu wyczyszczenia zablokowanej w tle sesji Streamlita!
-if 'init_v50' not in st.session_state:
-    st.session_state.init_v50 = True
+if 'init_v51' not in st.session_state:
+    st.session_state.init_v51 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -352,7 +341,7 @@ if 'init_v50' not in st.session_state:
     st.session_state.wybrany_klient_wz = None
     st.session_state.receptura_baza = {"K01": 32.00, "K02": 0.200, "K03": 0.100}
     
-    # WYWOŁANIE POBIERANIA I SAMOINICJALIZACJI W CHMURZE
+    # WYWOŁANIE BEZPIECZNEGO POBIERANIA BAZY
     zaladuj_lub_inicjalizuj_baze()
 
 def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
@@ -436,7 +425,7 @@ if st.sidebar.button("🔄 Wymuś synchronizację z chmurą"):
     st.rerun()
 
 # ==========================================
-# MODUŁ 1: PULPIT GŁÓWNEGO (DASHBOARD)
+# MODUŁ 1: PULPIT GŁÓWNY (DASHBOARD)
 # ==========================================
 if menu == "Pulpit Główny":
     st.header("Pulpit Zarządzania: GrizoThermo+")
@@ -941,7 +930,7 @@ elif menu == "Baza Kontrahentów (CRM)":
                     if c_edit.button("✏️", key=f"edit_btn_{idx}"): st.session_state.crm_edycja_id = idx; st.rerun()
                     if c_del.button("🗑️", key=f"del_btn_{idx}"):
                         st.session_state.kontrahenci = st.session_state.kontrahenci.drop(idx).reset_index(drop=True)
-                        zapisz_tabele_w_chmurze("Kontrahentci")
+                        zapisz_tabele_w_chmurze("Kontrahenci")
                         st.rerun()
         if st.session_state.crm_edycja_id is not None:
             idx_do_edycji = st.session_state.crm_edycja_id
