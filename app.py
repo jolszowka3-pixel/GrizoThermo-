@@ -25,7 +25,18 @@ def bezpieczny_str(wartosc):
 def bezpieczny_bool(wartosc, domyslna=False):
     if pd.isna(wartosc): return domyslna
     if isinstance(wartosc, bool): return wartosc
-    return str(wartosc).strip().upper() == "TRUE"
+    txt = str(wartosc).strip().upper()
+    # Tłumaczenie na Polski i angielski (ochrona przed polskim Google Sheets)
+    if txt in ["TRUE", "PRAWDA", "TAK", "YES", "1", "1.0"]: return True
+    if txt in ["FALSE", "FAŁSZ", "FALSZ", "NIE", "NO", "0", "0.0", ""]: return False
+    return domyslna
+
+def get_col(row, col_name, domyslna=None):
+    """Pobiera wartość z kolumny ignorując wielkość liter i spacje w nagłówkach"""
+    for c in row.index:
+        if str(c).strip().lower() == col_name.strip().lower():
+            return row[c]
+    return domyslna
 
 # ==========================================
 # FUNKCJE CHMUROWE (ODCZYT / BAZA GOOGLE)
@@ -37,7 +48,8 @@ def zaladuj_lub_inicjalizuj_baze():
     # 1. Zakładka: Uzytkownicy
     try:
         df_uz = conn.read(worksheet="Uzytkownicy", ttl=0)
-        if df_uz.empty or "Login" not in df_uz.columns: raise Exception()
+        cols_lower = [str(c).strip().lower() for c in df_uz.columns]
+        if df_uz.empty or "login" not in cols_lower: raise Exception()
     except:
         df_uz = pd.DataFrame([{
             "Login": "admin", "Haslo": "admin123", "Imie": "Kierownik Magazynu",
@@ -46,21 +58,21 @@ def zaladuj_lub_inicjalizuj_baze():
     
     uzytkownicy_dict = {}
     for _, row in df_uz.iterrows():
-        log_key = bezpieczny_str(row['Login'])
+        log_key = bezpieczny_str(get_col(row, 'login'))
         if not log_key: continue
         
         uzytkownicy_dict[log_key] = {
-            "haslo": bezpieczny_str(row['Haslo']), 
-            "imie": bezpieczny_str(row['Imie']),
+            "haslo": bezpieczny_str(get_col(row, 'haslo')), 
+            "imie": bezpieczny_str(get_col(row, 'imie')),
             "uprawnienia": {
-                "pulpit": bezpieczny_bool(row.get('pulpit', True), True),
-                "magazyn": bezpieczny_bool(row.get('magazyn', True), True),
-                "zk": bezpieczny_bool(row.get('zk', False)),
-                "produkcja": bezpieczny_bool(row.get('produkcja', False)),
-                "pz": bezpieczny_bool(row.get('pz', False)),
-                "wz": bezpieczny_bool(row.get('wz', False)),
-                "crm": bezpieczny_bool(row.get('crm', False)),
-                "admin": bezpieczny_bool(row.get('admin', False))
+                "pulpit": bezpieczny_bool(get_col(row, 'pulpit', True), True),
+                "magazyn": bezpieczny_bool(get_col(row, 'magazyn', True), True),
+                "zk": bezpieczny_bool(get_col(row, 'zk', False)),
+                "produkcja": bezpieczny_bool(get_col(row, 'produkcja', False)),
+                "pz": bezpieczny_bool(get_col(row, 'pz', False)),
+                "wz": bezpieczny_bool(get_col(row, 'wz', False)),
+                "crm": bezpieczny_bool(get_col(row, 'crm', False)),
+                "admin": bezpieczny_bool(get_col(row, 'admin', False))
             }
         }
     st.session_state.uzytkownicy = uzytkownicy_dict
@@ -68,8 +80,13 @@ def zaladuj_lub_inicjalizuj_baze():
     # 2. Zakładka: Kontrahenci
     try:
         df_kon = conn.read(worksheet="Kontrahenci", ttl=0)
-        if df_kon.empty or "Nazwa" not in df_kon.columns: raise Exception()
-        if "NIP" in df_kon.columns: df_kon["NIP"] = df_kon["NIP"].apply(bezpieczny_str)
+        cols_lower = [str(c).strip().lower() for c in df_kon.columns]
+        if df_kon.empty or "nazwa" not in cols_lower: raise Exception()
+        
+        # Ochrona NIPu przed notacją naukową
+        for col in df_kon.columns:
+            if str(col).strip().upper() == "NIP":
+                df_kon[col] = df_kon[col].apply(bezpieczny_str)
         st.session_state.kontrahenci = df_kon
     except:
         st.session_state.kontrahenci = pd.DataFrame([
@@ -81,7 +98,8 @@ def zaladuj_lub_inicjalizuj_baze():
     # 3. Zakładka: Komponenty (Surowce)
     try:
         df_komp = conn.read(worksheet="Komponenty", ttl=0)
-        if df_komp.empty or "ID" not in df_komp.columns: raise Exception()
+        cols_lower = [str(c).strip().lower() for c in df_komp.columns]
+        if df_komp.empty or "id" not in cols_lower: raise Exception()
         st.session_state.komponenty = df_komp
     except:
         st.session_state.komponenty = pd.DataFrame([
@@ -93,7 +111,8 @@ def zaladuj_lub_inicjalizuj_baze():
     # 4. Zakładka: Polprodukty
     try:
         df_pol = conn.read(worksheet="Polprodukty", ttl=0)
-        if df_pol.empty or "ID" not in df_pol.columns: raise Exception()
+        cols_lower = [str(c).strip().lower() for c in df_pol.columns]
+        if df_pol.empty or "id" not in cols_lower: raise Exception()
         st.session_state.polprodukty = df_pol
     except:
         st.session_state.polprodukty = pd.DataFrame([{"ID": "P01", "Nazwa": "Rolka Jumbo (115cm x 13mb)", "Stan": 0, "Jednostka": "szt."}])
@@ -101,7 +120,8 @@ def zaladuj_lub_inicjalizuj_baze():
     # 5. Zakładka: Produkty (Wyroby gotowe)
     try:
         df_prod = conn.read(worksheet="Produkty", ttl=0)
-        if df_prod.empty or "Wariant" not in df_prod.columns: raise Exception()
+        cols_lower = [str(c).strip().lower() for c in df_prod.columns]
+        if df_prod.empty or "wariant" not in cols_lower: raise Exception()
         st.session_state.produkty = df_prod
     except:
         szerokosci = [10, 15, 20, 25, 30, 35, 115]
@@ -115,7 +135,8 @@ def zaladuj_lub_inicjalizuj_baze():
     # 6. Zakładka: Historia
     try:
         df_hist = conn.read(worksheet="Historia", ttl=0)
-        if df_hist.empty or "Typ" not in df_hist.columns: raise Exception()
+        cols_lower = [str(c).strip().lower() for c in df_hist.columns]
+        if df_hist.empty or "typ" not in cols_lower: raise Exception()
         st.session_state.historia = df_hist
     except:
         st.session_state.historia = pd.DataFrame(columns=kolumny_historii)
@@ -123,14 +144,22 @@ def zaladuj_lub_inicjalizuj_baze():
     # 7. Zakładka: Zamowienia
     try:
         df_zam = conn.read(worksheet="Zamowienia", ttl=0)
-        if df_zam.empty or "ID" not in df_zam.columns: raise Exception()
+        cols_lower = [str(c).strip().lower() for c in df_zam.columns]
+        if df_zam.empty or "id" not in cols_lower: raise Exception()
         zam_list = []
         for _, row_z in df_zam.iterrows():
-            try: pozycje_data = json.loads(row_z['Pozycje'])
+            try: pozycje_data = json.loads(get_col(row_z, 'pozycje', '[]'))
             except: pozycje_data = []
+            
+            uwagi_val = get_col(row_z, 'uwagi', '')
+            
             zam_list.append({
-                "id": str(row_z['ID']), "data": str(row_z['Data']), "klient": str(row_z['Klient']),
-                "pozycje": pozycje_data, "uwagi": str(row_z['Uwagi']) if pd.notna(row_z['Uwagi']) else "", "Status": str(row_z['Status'])
+                "id": bezpieczny_str(get_col(row_z, 'id')), 
+                "data": bezpieczny_str(get_col(row_z, 'data')), 
+                "klient": bezpieczny_str(get_col(row_z, 'klient')),
+                "pozycje": pozycje_data, 
+                "uwagi": str(uwagi_val) if pd.notna(uwagi_val) else "", 
+                "Status": bezpieczny_str(get_col(row_z, 'status'))
             })
         st.session_state.zamowienia = zam_list
     except:
@@ -139,16 +168,20 @@ def zaladuj_lub_inicjalizuj_baze():
     # 8. Zakładka: ZleceniaProdukcyjne
     try:
         df_zl = conn.read(worksheet="ZleceniaProdukcyjne", ttl=0)
-        if df_zl.empty or "ID" not in df_zl.columns: raise Exception()
+        cols_lower = [str(c).strip().lower() for c in df_zl.columns]
+        if df_zl.empty or "id" not in cols_lower: raise Exception()
         zl_list = []
         for _, row_l in df_zl.iterrows():
-            try: snap = json.loads(row_l['MrpSnap'])
+            try: snap = json.loads(get_col(row_l, 'mrpsnap', '{}'))
             except: snap = {}
-            try: powiazane = json.loads(row_l['ZamowieniaPowiazane'])
+            try: powiazane = json.loads(get_col(row_l, 'zamowieniapowiazane', '[]'))
             except: powiazane = []
             zl_list.append({
-                "id": str(row_l['ID']), "data": str(row_l['Data']), "mrp_snap": snap,
-                "zamowienia_powiazane": powiazane, "status": str(row_l['Status'])
+                "id": bezpieczny_str(get_col(row_l, 'id')), 
+                "data": bezpieczny_str(get_col(row_l, 'data')), 
+                "mrp_snap": snap,
+                "zamowienia_powiazane": powiazane, 
+                "status": bezpieczny_str(get_col(row_l, 'status'))
             })
         st.session_state.zlecenia_produkcyjne = zl_list
     except:
@@ -157,14 +190,23 @@ def zaladuj_lub_inicjalizuj_baze():
     # 9. Zakładka: RejestrWZ
     try:
         df_rwz = conn.read(worksheet="RejestrWZ", ttl=0)
-        if df_rwz.empty or "NrWz" not in df_rwz.columns: raise Exception()
+        cols_lower = [str(c).strip().lower() for c in df_rwz.columns]
+        if df_rwz.empty or "nrwz" not in cols_lower: raise Exception()
         rwz_list = []
         for _, row_w in df_rwz.iterrows():
-            try: poz = json.loads(row_w['Pozycje'])
+            try: poz = json.loads(get_col(row_w, 'pozycje', '[]'))
             except: poz = []
+            
+            uwagi_val = get_col(row_w, 'uwagi', '')
+            
             rwz_list.append({
-                "nr_wz": str(row_w['NrWz']), "data": str(row_w['Data']), "klient_nazwa": str(row_w['KlientNazwa']),
-                "klient_adres": str(row_w['KlientAdres']), "klient_nip": bezpieczny_str(row_w['KlientNip']), "pozycje": poz, "uwagi": str(row_w['Uwagi']) if pd.notna(row_w['Uwagi']) else ""
+                "nr_wz": bezpieczny_str(get_col(row_w, 'nrwz')), 
+                "data": bezpieczny_str(get_col(row_w, 'data')), 
+                "klient_nazwa": bezpieczny_str(get_col(row_w, 'klientnazwa')),
+                "klient_adres": bezpieczny_str(get_col(row_w, 'klientadres')), 
+                "klient_nip": bezpieczny_str(get_col(row_w, 'klientnip')), 
+                "pozycje": poz, 
+                "uwagi": str(uwagi_val) if pd.notna(uwagi_val) else ""
             })
         st.session_state.rejestr_wz = rwz_list
     except:
@@ -175,10 +217,18 @@ def zaladuj_lub_inicjalizuj_baze():
     st.session_state.wz_counter = len(st.session_state.rejestr_wz) + 1
     st.session_state.pr_counter = len(st.session_state.zlecenia_produkcyjne) + 1
     
-    if not st.session_state.historia.empty and "Typ" in st.session_state.historia.columns:
-        st.session_state.jumbo_counter = len(st.session_state.historia[st.session_state.historia["Typ"] == "PW (Półprod.)"]) + 1
-        st.session_state.konf_counter = len(st.session_state.historia[st.session_state.historia["Typ"] == "PW (Gotowe)"]) + 1
-        st.session_state.okl_counter = len(st.session_state.historia[st.session_state.historia["Typ"] == "PW (Gotowe)"]) + 1
+    # Bezpieczne znajdowanie kolumny Typ w historii dla liczników
+    kolumna_typ = None
+    if not st.session_state.historia.empty:
+        for c in st.session_state.historia.columns:
+            if str(c).strip().lower() == "typ":
+                kolumna_typ = c
+                break
+                
+    if kolumna_typ:
+        st.session_state.jumbo_counter = len(st.session_state.historia[st.session_state.historia[kolumna_typ] == "PW (Półprod.)"]) + 1
+        st.session_state.konf_counter = len(st.session_state.historia[st.session_state.historia[kolumna_typ] == "PW (Gotowe)"]) + 1
+        st.session_state.okl_counter = len(st.session_state.historia[st.session_state.historia[kolumna_typ] == "PW (Gotowe)"]) + 1
     else:
         st.session_state.jumbo_counter = 1
         st.session_state.konf_counter = 1
@@ -352,9 +402,9 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-# ZMIANA: Nowy klucz wymusi całkowite wyczyszczenie błędnej pamięci przeglądarki!
-if 'init_v53' not in st.session_state:
-    st.session_state.init_v53 = True
+# ZMIANA: init_v54 - wymusza odświeżenie i wczytanie poprawionych uprawnień
+if 'init_v54' not in st.session_state:
+    st.session_state.init_v54 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
