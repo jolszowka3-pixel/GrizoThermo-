@@ -37,7 +37,7 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
-# FUNKCJA POMOCNICZA DO GENEROWANIA WZ PDF (UŻYWANA PRZY WYSTAWIANIU I RE-WYDRUKU)
+# FUNKCJA POMOCNICZA DO GENEROWANIA WZ PDF
 # ==========================================
 def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, pozycje, uwagi):
     font_path, font_bold_path = pobierz_czcionki()
@@ -116,7 +116,7 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
     return pdf.output(dest="S").encode("latin-1")
 
 # ==========================================
-# 1. INICJALIZACJA BAZY (WERSJA V49 + REJESTRY WZ/PZ)
+# 1. INICJALIZACJA BAZY
 # ==========================================
 if 'init_v49' not in st.session_state:
     st.session_state.init_v49 = True
@@ -128,7 +128,7 @@ if 'init_v49' not in st.session_state:
     st.session_state.pr_counter = 1 
     
     st.session_state.zlecenia_produkcyjne = [] 
-    st.session_state.rejestr_wz = [] # Nowy stały słownik do przechowywania dokumentów WZ dla re-wydruku
+    st.session_state.rejestr_wz = [] 
     
     st.session_state.uzytkownicy = {
         "admin": {
@@ -985,40 +985,130 @@ elif menu == "Moduł Production":
                         st.success(f"Zlecenie {job['id']} zamknięte pomyślnie. Towar trafił na stan magazynu gotowego.")
                         st.rerun()
 
+# ==========================================
+# MODUŁ: BAZA KONTRAHENTÓW (CRM) - ROZBUDOWANY O MODYFIKACJĘ, USUWANIE I LEPSZĄ CZYTELNOŚĆ
+# ==========================================
 elif menu == "Baza Kontrahentów (CRM)":
-    st.header("Baza Kontrahentów")
-    st.write("Zarządzanie relacjami z klientami oraz dostawcami surowców.")
-    tab_odbiorcy, tab_dostawcy, tab_dodaj = st.tabs(["Klienci (Odbiorcy WZ)", "Dostawcy (Przyjęcia PZ)", "Nowy Kontrahent"])
-    with tab_odbiorcy:
-        df_odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]
-        for _, row in df_odbiorcy.iterrows(): st.markdown(f'<div class="item-card"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">NIP: {row["NIP"]} | Adres siedziby: {row["Adres"]}</div></div>', unsafe_allow_html=True)
-    with tab_dostawcy:
-        df_dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]
-        for _, row in df_dostawcy.iterrows(): st.markdown(f'<div class="item-card item-card-purple"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">NIP: {row["NIP"]} | Adres dystrybucji: {row["Adres"]}</div></div>', unsafe_allow_html=True)
+    st.header("Zarządzanie Bazą Kontrahentów (CRM)")
+    st.write("Przeglądaj podmioty handlowe, modyfikuj ich dane rejestrowe oraz zarządzaj nowymi wpisami.")
+    
+    # Inicjalizacja pomocniczych zmiennych stanu sesji dla edycji
+    if "crm_edycja_id" not in st.session_state:
+        st.session_state.crm_edycja_id = None
+        
+    tab_przeglad, tab_dodaj = st.tabs(["📋 Rejestr i Modyfikacja Firm", "➕ Dodaj Nowy Podmiot"])
+    
+    with tab_przeglad:
+        # Podział na Odbiorców i Dostawców dla pełnej przejrzystości
+        filtr_typ = st.radio("Filtruj rejestr firm:", ["Wszystkie podmioty", "Klienci (Odbiorcy)", "Dostawcy surowców"], horizontal=True)
+        
+        df_crm = st.session_state.kontrahenci.copy()
+        if filtr_typ == "Klienci (Odbiorcy)":
+            df_crm = df_crm[df_crm["Typ"] == "Odbiorca"]
+        elif filtr_typ == "Dostawcy surowców":
+            df_crm = df_crm[df_crm["Typ"] == "Dostawca"]
+            
+        if df_crm.empty:
+            st.info("Brak podmiotów spełniających wybrane kryteria.")
+        else:
+            st.write("---")
+            for idx, row in df_crm.iterrows():
+                col_dane, col_akcje = st.columns([4, 1])
+                
+                with col_dane:
+                    border_style = "item-card-purple" if row["Typ"] == "Dostawca" else "item-card"
+                    st.markdown(f'''
+                    <div class="{border_style}">
+                        <div class="card-title">{row["Nazwa"]} <span style="font-size:0.8rem; font-weight:normal; background:#e5e7eb; padding:2px 6px; border-radius:4px; margin-left:10px;">{row["Typ"]}</span></div>
+                        <div class="card-details"><b>NIP:</b> {row["NIP"]} | <b>Adres siedziby:</b> {row["Adres"]}</div>
+                    </div>
+                    ''', unsafe_allow_html=True)
+                
+                with col_akcje:
+                    st.markdown("<div style='margin-top:5px;'></div>", unsafe_allow_html=True)
+                    # Przyciski do Edycji i Usuwania
+                    c_edit, c_del = st.columns(2)
+                    if c_edit.button("✏️", key=f"edit_btn_{idx}", help="Modyfikuj dane firmy"):
+                        st.session_state.crm_edycja_id = idx
+                        st.rerun()
+                    if c_del.button("🗑️", key=f"del_btn_{idx}", help="Usuń bezpowrotnie firmę"):
+                        st.session_state.kontrahenci = st.session_state.kontrahenci.drop(idx).reset_index(drop=True)
+                        st.toast(f"Usunięto podmiot: {row['Nazwa']}")
+                        st.rerun()
+                        
+            # FORMULARZ EDYCJI (Wyświetla się tylko po kliknięciu ikony ołówka)
+            if st.session_state.crm_edycja_id is not None:
+                st.divider()
+                idx_do_edycji = st.session_state.crm_edycja_id
+                # Zabezpieczenie przed wyjściem indeksu poza zakres po usunięciu
+                if idx_do_edycji < len(st.session_state.kontrahenci):
+                    firma_dane = st.session_state.kontrahenci.iloc[idx_do_edycji]
+                    
+                    st.subheader(f"Modyfikacja danych: {firma_dane['Nazwa']}")
+                    with st.form("edycja_firmy_form"):
+                        e_nazwa = st.text_input("Pełna nazwa podmiotu", value=firma_dane["Nazwa"])
+                        e_nip = st.text_input("Identyfikator podatkowy NIP", value=firma_dane["NIP"])
+                        e_adres = st.text_input("Adres rejestrowy / dystrybucyjny", value=firma_dane["Adres"])
+                        e_typ = st.selectbox("Klasyfikacja operacyjna", ["Odbiorca", "Dostawca"], index=0 if firma_dane["Typ"] == "Odbiorca" else 1)
+                        
+                        c_e1, c_e2 = st.columns(2)
+                        if c_e1.form_submit_button("Zapisz zmiany w bazie"):
+                            if e_nazwa.strip() and e_adres.strip():
+                                st.session_state.kontrahenci.at[idx_do_edycji, "Nazwa"] = e_nazwa.strip()
+                                st.session_state.kontrahenci.at[idx_do_edycji, "NIP"] = e_nip.strip()
+                                st.session_state.kontrahenci.at[idx_do_edycji, "Adres"] = e_adres.strip()
+                                st.session_state.kontrahenci.at[idx_do_edycji, "Typ"] = e_typ
+                                st.session_state.crm_edycja_id = None
+                                st.success("Dane kontrahenta zostały pomyślnie zaktualizowane.")
+                                st.rerun()
+                            else:
+                                st.error("Nazwa oraz adres nie mogą być puste.")
+                        if c_e2.form_submit_button("Anuluj edycję"):
+                            st.session_state.crm_edycja_id = None
+                            st.rerun()
+                else:
+                    st.session_state.crm_edycja_id = None
+
     with tab_dodaj:
-        st.subheader("Formularz rejestracji nowego podmiotu")
-        with st.form("nowy_kontrahent_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                nowa_nazwa = st.text_input("Pełna nazwa firmy (Wymagane)")
-                nowy_nip = st.text_input("Numer identyfikacji podatkowej (NIP)")
-            with col2:
-                nowy_typ = st.selectbox("Typ operacyjny podmiotu", ["Odbiorca", "Dostawca"])
-                nowy_adres = st.text_input("Adres rejestracyjny (Wymagane)")
-            if st.form_submit_button("Zarejestruj podmiot w systemie"):
+        st.subheader("Karta rejestracyjna nowego kontrahenta")
+        st.write("Wypełnij poniższe pola. Pola oznaczone gwiazdką (*) są niezbędne do prawidłowego wystawiania dokumentów WZ/PZ.")
+        
+        # Bardziej czytelna struktura formularza (podział na kolumny bazowe)
+        with st.form("nowy_kontrahent_rozbudowany_form"):
+            col_form1, col_form2 = st.columns(2)
+            
+            with col_form1:
+                nowa_nazwa = st.text_input("🏢 Pełna nazwa rejestrowa firmy *")
+                nowy_nip = st.text_input("📌 Numer identyfikacji podatkowej (NIP)")
+                
+            with col_form2:
+                nowy_typ = st.selectbox("🏷️ Typ profilu w systemie", ["Odbiorca", "Dostawca"], help="Odbiorca pozwala na wystawianie dokumentów WZ, Dostawca na dokumenty PZ.")
+                nowy_adres = st.text_input("📍 Dokładny adres siedziby (Ulica, Kod, Miasto) *")
+                
+            st.markdown("<br>", unsafe_allow_html=True)
+            col_sb1, col_sb2 = st.columns([1, 4])
+            with col_sb1:
+                submit_nowy = st.form_submit_button("Zapisz w CRM", type="primary", use_container_width=True)
+                
+            if submit_nowy:
                 if nowa_nazwa.strip() and nowy_adres.strip():
-                    nowy_wpis = pd.DataFrame([{"Nazwa": nowa_nazwa.strip(), "NIP": nowy_nip.strip(), "Adres": nowy_adres.strip(), "Typ": nowy_typ}])
+                    nowy_wpis = pd.DataFrame([{
+                        "Nazwa": nowa_nazwa.strip(),
+                        "NIP": nowy_nip.strip(),
+                        "Adres": nowy_adres.strip(),
+                        "Typ": nowy_typ
+                    }])
                     st.session_state.kontrahenci = pd.concat([st.session_state.kontrahenci, nowy_wpis], ignore_index=True)
-                    st.success(f"Podmiot {nowa_nazwa} został zapisany w CRM.")
+                    st.success(f"Sukces! Podmiot **{nowa_nazwa.strip()}** został poprawnie zarejestrowany w systemie CRM.")
                     st.rerun()
+                else:
+                    st.error("Błąd rejestracji. Pola 'Nazwa firmy' oraz 'Adres siedziby' są obowiązkowe.")
 
 # ==========================================
-# MODUŁ PRZYJĘCIE TOWARU (PZ) - Z INTEGRACJĄ ARCHIWUM
+# MODUŁ PRZYJĘCIE TOWARU (PZ)
 # ==========================================
 elif menu == "Przyjęcie Towaru (PZ)":
     st.header("Przyjęcie Zewnętrzne (PZ)")
-    
-    # ZMIANA: Dodano zakładki (Wprowadź i Rejestr) bezpośrednio do modułu PZ
     tab_nowe_pz, tab_rejestr_pz = st.tabs(["Wprowadź Dokument PZ", "🗂️ Rejestr Dokumentów PZ"])
     
     with tab_nowe_pz:
@@ -1046,16 +1136,13 @@ elif menu == "Przyjęcie Towaru (PZ)":
                 use_container_width=True, hide_index=True,
                 column_config={"Data":"Data przyjęcia", "Dokument":"Numer PZ", "Produkt/Surowiec":"Surowiec", "Ilosc":"Ilość", "Kontrahent":"Dostawca"}
             )
-        else:
-            st.info("Brak zarejestrowanych dokumentów PZ w bazie.")
+        else: st.info("Brak zarejestrowanych dokumentów PZ w bazie.")
 
 # ==========================================
-# MODUŁ WYDANIE TOWARU (WZ) - Z INTEGRACJĄ ARCHIWUM I RE-WYDRUKU
+# MODUŁ WYDANIE TOWARU (WZ)
 # ==========================================
 elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
-    
-    # ZMIANA: Dodano zakładki (Wprowadź i Rejestr) bezpośrednio do modułu WZ
     tab_nowe_wz, tab_rejestr_wz = st.tabs(["Wprowadź Dokument WZ", "🗂️ Rejestr Dokumentów WZ / Ponowny Wydruk"])
     
     with tab_nowe_wz:
@@ -1088,7 +1175,7 @@ elif menu == "Wydanie Towaru (WZ)":
             else: st.info("Brak wyprodukowanych zamówień oczekujących na wydanie. Możesz też wystawić WZ ręcznie z wolnego asortymentu.")
             
             st.divider()
-            dostepne_produkty = st.session_state.produkty[st.session_state.produkty["Stand" if "Stand" in st.session_state.produkty else "Stan"] > 0].copy()
+            dostepne_produkty = st.session_state.produkty[st.session_state.produkty["Stan"] > 0].copy()
             if dostepne_produkty.empty and not st.session_state.wz_koszyk: st.error("Brak gotowych produktów na magazynie! Wymagana konfekcja i odbiór z hali.")
             else:
                 data_dzis_str = datetime.now().strftime("%Y/%m/%d")
@@ -1150,7 +1237,6 @@ elif menu == "Wydanie Towaru (WZ)":
                                 klient_adres = dane_klienta["Adres"]
                                 klient_nip = dane_klienta["NIP"]
                                 
-                                # Aktualizacja stanów fizycznych produktów
                                 for pozycja in st.session_state.wz_koszyk:
                                     nazwa_w = pozycja["Wariant"]
                                     ile_w = pozycja["Ilosc"]
@@ -1158,7 +1244,6 @@ elif menu == "Wydanie Towaru (WZ)":
                                     st.session_state.produkty.at[idx, "Stan"] -= ile_w
                                     dodaj_ruch("WZ", nr_wz_auto, nazwa_w, ile_w, wybrany_klient)
                                 
-                                # Zapisujemy dane dokumentu do stałego rejestru (potrzebne do ponownego wydruku)
                                 st.session_state.rejestr_wz.append({
                                     "nr_wz": nr_wz_auto,
                                     "data": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -1170,77 +1255,57 @@ elif menu == "Wydanie Towaru (WZ)":
                                 })
                                 
                                 st.session_state.wz_counter += 1
-                                
                                 if st.session_state.powiazane_zk:
                                     for zmw in st.session_state.zamowienia:
                                         if zmw["id"] == st.session_state.powiazane_zk: zmw["Status"] = "Zrealizowane"; break
                                     st.session_state.powiazane_zk = None
                                 
-                                # Wywołanie uniwersalnej funkcji generującej PDF
                                 pdf_data = generuj_wz_pdf(nr_wz_auto, datetime.now().strftime("%Y-%m-%d"), wybrany_klient, klient_adres, klient_nip, st.session_state.wz_koszyk, uwagi_doc)
                                 st.session_state.wz_pdf_do_pobrania = {"nazwa": f"{nr_wz_auto.replace('/', '_')}.pdf", "data": pdf_data}
                                 st.session_state.wz_koszyk = []
                                 st.rerun()
 
-    # ZMIANA: Nowa zakładka w WZ wyświetlająca historię z przyciskiem ponownego pobrania PDF
     with tab_rejestr_wz:
         st.subheader("Archiwum wystawionych dokumentów WZ")
-        if not st.session_state.rejestr_wz:
-            st.info("Nie wystawiono jeszcze żadnego dokumentu WZ w tej sesji.")
+        if not st.session_state.rejestr_wz: st.info("Nie wystawiono jeszcze żadnego dokumentu WZ.")
         else:
             for dokument in reversed(st.session_state.rejestr_wz):
                 with st.expander(f"📄 Dokument: {dokument['nr_wz']} | Klient: {dokument['klient_nazwa']} | Data: {dokument['data']}"):
                     st.write(f"**Adres:** {dokument['klient_adres']} | **NIP:** {dokument['klient_nip']}")
-                    if dokument["uwagi"]:
-                        st.write(f"**Uwagi:** {dokument['uwagi']}")
-                    
+                    if dokument["uwagi"]: st.write(f"**Uwagi:** {dokument['uwagi']}")
                     st.write("**Lista wydanych produktów:**")
                     df_doc_pos = pd.DataFrame(dokument["pozycje"])
                     df_doc_pos.columns = ["Nazwa asortymentu", "Ilość (szt.)"]
                     st.dataframe(df_doc_pos, hide_index=True, use_container_width=True)
                     
-                    # GENEROWANIE I PONOWNY WYDRUK Z ARCHIWUM
-                    pdf_ponowny = generuj_wz_pdf(
-                        dokument['nr_wz'], 
-                        dokument['data'].split(" ")[0], 
-                        dokument['klient_nazwa'], 
-                        dokument['klient_adres'], 
-                        dokument['klient_nip'], 
-                        dokument['pozycje'], 
-                        dokument['uwagi']
-                    )
-                    
-                    st.download_button(
-                        label=f"📥 Pobierz ponownie PDF dla {dokument['nr_wz']}",
-                        data=pdf_ponowny,
-                        file_name=f"Kopia_{dokument['nr_wz'].replace('/', '_')}.pdf",
-                        mime="application/pdf",
-                        key=f"reprint_{dokument['nr_wz']}"
-                    )
+                    pdf_ponowny = generuj_wz_pdf(dokument['nr_wz'], dokument['data'].split(" ")[0], dokument['klient_nazwa'], dokument['klient_adres'], dokument['klient_nip'], dokument['pozycje'], dokument['uwagi'])
+                    st.download_button(label=f"📥 Pobierz ponownie PDF dla {dokument['nr_wz']}", data=pdf_ponowny, file_name=f"Kopia_{dokument['nr_wz'].replace('/', '_')}.pdf", mime="application/pdf", key=f"reprint_{dokument['nr_wz']}")
 
-elif menu == "Baza Kontrahentów (CRM)":
-    st.header("Baza Kontrahentów")
-    st.write("Zarządzanie relacjami z klientami oraz dostawcami surowców.")
-    tab_odbiorcy, tab_dostawcy, tab_dodaj = st.tabs(["Klienci (Odbiorcy WZ)", "Dostawcy (Przyjęcia PZ)", "Nowy Kontrahent"])
-    with tab_odbiorcy:
-        df_odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]
-        for _, row in df_odbiorcy.iterrows(): st.markdown(f'<div class="item-card"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">NIP: {row["NIP"]} | Adres siedziby: {row["Adres"]}</div></div>', unsafe_allow_html=True)
-    with tab_dostawcy:
-        df_dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]
-        for _, row in df_dostawcy.iterrows(): st.markdown(f'<div class="item-card item-card-purple"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">NIP: {row["NIP"]} | Adres dystrybucji: {row["Adres"]}</div></div>', unsafe_allow_html=True)
-    with tab_dodaj:
-        st.subheader("Formularz rejestracji nowego podmiotu")
-        with st.form("nowy_kontrahent_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                nowa_nazwa = st.text_input("Pełna nazwa firmy (Wymagane)")
-                nowy_nip = st.text_input("Numer identyfikacji podatkowej (NIP)")
-            with col2:
-                nowy_typ = st.selectbox("Typ operacyjny podmiotu", ["Odbiorca", "Dostawca"])
-                nowy_adres = st.text_input("Adres rejestracyjny (Wymagane)")
-            if st.form_submit_button("Zarejestruj podmiot w systemie"):
-                if nowa_nazwa.strip() and nowy_adres.strip():
-                    nowy_wpis = pd.DataFrame([{"Nazwa": nowa_nazwa.strip(), "NIP": nowy_nip.strip(), "Adres": nowy_adres.strip(), "Typ": nowy_typ}])
-                    st.session_state.kontrahenci = pd.concat([st.session_state.kontrahenci, nowy_wpis], ignore_index=True)
-                    st.success(f"Podmiot {nowa_nazwa} został zapisany w CRM.")
+# ==========================================
+# MODUŁ PANEL ADMINISTRACYJNY
+# ==========================================
+elif menu == "Panel Administracyjny":
+    st.header("Narzędzia Administracyjne")
+    tab_uzytkownicy, tab_korekt_surowce, tab_korekt_prod = st.tabs(["Konta Użytkowników", "Korekta Surowców", "Korekta Wyrobów Gotowych"])
+    with tab_uzytkownicy:
+        with st.form("dodaj_uzytkownika"):
+            login = st.text_input("Login")
+            imie = st.text_input("Imię i Nazwisko")
+            haslo = st.text_input("Hasło startowe", type="password")
+            if st.form_submit_button("Utwórz konto"):
+                if login and haslo and imie:
+                    st.session_state.uzytkownicy[login.strip()] = {"haslo": haslo, "imie": imie, "uprawnienia": {"produkcja": True, "pz": True, "wz": True, "admin": False}}
+                    st.success("Konto zostało pomyślnie utworzone.")
                     st.rerun()
+    with tab_korekt_surowce:
+        zm_k = st.data_editor(st.session_state.komponenty, hide_index=True, use_container_width=True)
+        if st.button("Zapisz korektę surowców"):
+            st.session_state.komponenty = zm_k
+            st.success("Korekta surowców pomyślnie zapisana.")
+            st.rerun()
+    with tab_korekt_prod:
+        zm_p = st.data_editor(st.session_state.produkty, hide_index=True, use_container_width=True)
+        if st.button("Zapisz korektę produktów gotowych"):
+            st.session_state.produkty = zm_p
+            st.success("Korekta wyrobów gotowych pomyślnie zapisana.")
+            st.rerun()
