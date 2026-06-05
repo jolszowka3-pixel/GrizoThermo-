@@ -17,8 +17,10 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # FUNKCJE CHMUROWE (ODCZYT / BEZPIECZNA INICJALIZACJA BAZY GOOGLE)
 # ==========================================
 def zaladuj_lub_inicjalizuj_baze():
-    """Pobiera dane z chmury. W przypadku pustych arkuszy ładuje bazę do pamięci (bez spamu do API)."""
+    """Pobiera dane z chmury. W przypadku pustych arkuszy ładuje bazę do pamięci."""
     
+    kolumny_historii = ["Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"]
+
     # 1. Zakładka: Uzytkownicy
     try:
         df_uz = conn.read(worksheet="Uzytkownicy", ttl=0)
@@ -94,7 +96,7 @@ def zaladuj_lub_inicjalizuj_baze():
         if df_hist.empty or "Typ" not in df_hist.columns: raise Exception()
         st.session_state.historia = df_hist
     except:
-        st.session_state.historia = pd.DataFrame(columns=["Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"])
+        st.session_state.historia = pd.DataFrame(columns=kolumny_historii)
 
     # 7. Zakładka: Zamowienia
     try:
@@ -112,7 +114,7 @@ def zaladuj_lub_inicjalizuj_baze():
     except:
         st.session_state.zamowienia = []
 
-    # 8. Zakładka: ZleceniaProdukcyjne (Karta pracy Kroku 4)
+    # 8. Zakładka: ZleceniaProdukcyjne
     try:
         df_zl = conn.read(worksheet="ZleceniaProdukcyjne", ttl=0)
         if df_zl.empty or "ID" not in df_zl.columns: raise Exception()
@@ -195,7 +197,6 @@ def zapisz_tabele_w_chmurze(nazwa_tabeli):
                     "ID": z["id"], "Data": z["data"], "Klient": z["klient"],
                     "Pozycje": json.dumps(z["pozycje"]), "Uwagi": z["uwagi"], "Status": z["Status"]
                 })
-            # Jeśli lista jest pusta, tworzymy pusty DataFrame z poprawnymi nagłówkami
             df_to_save = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["ID", "Data", "Klient", "Pozycje", "Uwagi", "Status"])
             conn.update(worksheet="Zamowienia", data=df_to_save)
         elif nazwa_tabeli == "ZleceniaProdukcyjne":
@@ -217,7 +218,7 @@ def zapisz_tabele_w_chmurze(nazwa_tabeli):
             df_to_save = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["NrWz", "Data", "KlientNazwa", "KlientAdres", "KlientNip", "Pozycje", "Uwagi"])
             conn.update(worksheet="RejestrWZ", data=df_to_save)
     except Exception as e:
-        st.error(f"Błąd zapisu w chmurze (Tabela: {nazwa_tabeli}): {e}")
+        st.error(f"Błąd zapisu w chmurze (Tabela {nazwa_tabeli}): {e}")
 
 # ==========================================
 # DANE TWOJEJ FIRMY
@@ -329,8 +330,9 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-if 'init_v51' not in st.session_state:
-    st.session_state.init_v51 = True
+# ZMIANA: init_v52 w celu wymuszenia przeładowania pamięci Streamlit!
+if 'init_v52' not in st.session_state:
+    st.session_state.init_v52 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -341,15 +343,14 @@ if 'init_v51' not in st.session_state:
     st.session_state.wybrany_klient_wz = None
     st.session_state.receptura_baza = {"K01": 32.00, "K02": 0.200, "K03": 0.100}
     
-    # WYWOŁANIE BEZPIECZNEGO POBIERANIA BAZY
     zaladuj_lub_inicjalizuj_baze()
 
 def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     uzytkownik = st.session_state.aktualny_uzytkownik if st.session_state.aktualny_uzytkownik else "System"
     nowy_ruch = pd.DataFrame([{
         "Data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Typ": typ, "Dokument": dokument, "Produkt/Surowiec": nazwa,
-        "Ilosc": ilosc, "Użytkownik": uzytkownik, "Kontrahent": kontrahent
+        "Typ": str(typ), "Dokument": str(dokument), "Produkt/Surowiec": str(nazwa),
+        "Ilosc": float(ilosc), "Użytkownik": str(uzytkownik), "Kontrahent": str(kontrahent)
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
     zapisz_tabele_w_chmurze("Historia")
@@ -433,7 +434,7 @@ if menu == "Pulpit Główny":
     
     suma_gotowych = int(st.session_state.produkty["Stan"].sum())
     stan_jumbo = int(st.session_state.polprodukty.loc[0, "Stan"])
-    stan_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
+    stan_alu = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0])
     oczekujace_zk = len([z for z in st.session_state.zamowienia if z["Status"] in ["Czeka na realizację", "W produkcji", "Gotowe do wydania"]])
 
     col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
@@ -446,10 +447,11 @@ if menu == "Pulpit Główny":
     
     braki_surowcowe = []
     for _, row_k in st.session_state.komponenty.iterrows():
-        prog_alarmowy = st.session_state.receptura_baza.get(row_k['ID'], 0) * 20
-        if row_k['Stan'] < prog_alarmowy:
-            niedobor = prog_alarmowy - row_k['Stan']
-            braki_surowcowe.append(f"{row_k['Nazwa']} (Aktualnie: {row_k['Stan']:g} {row_k['Jednostka']}, Deficyt: {niedobor:g} {row_k['Jednostka']})")
+        prog_alarmowy = float(st.session_state.receptura_baza.get(row_k['ID'], 0)) * 20
+        aktualny_stan = float(row_k['Stan'])
+        if aktualny_stan < prog_alarmowy:
+            niedobor = prog_alarmowy - aktualny_stan
+            braki_surowcowe.append(f"{row_k['Nazwa']} (Aktualnie: {aktualny_stan:g} {row_k['Jednostka']}, Deficyt: {niedobor:g} {row_k['Jednostka']})")
             
     if braki_surowcowe:
         st.error("ALERT: Krytyczny poziom surowców produkcyjnych\n\nBieżący stan magazynowy uniemożliwia realizację partii 20 sztuk rolek Jumbo:\n\n" + "\n".join([f"* {b}" for b in braki_surowcowe]))
@@ -487,7 +489,7 @@ elif menu == "Stan Magazynu":
         pokaz_wszystkie = st.checkbox("Wyświetl warianty z zerowym stanem magazynowym", value=True)
         st.write("")
         for _, row in st.session_state.produkty.iterrows():
-            if row['Stan'] > 0 or pokaz_wszystkie:
+            if float(row['Stan']) > 0 or pokaz_wszystkie:
                 st.markdown(f'<div class="item-card"><div class="card-title">{row["Wariant"]}</div><div class="card-details">Szerokość handlowa: {row["Szerokosc"]} cm | Stan: {int(row["Stan"])} szt.</div></div>', unsafe_allow_html=True)
 
     with tab_polprod:
@@ -498,11 +500,12 @@ elif menu == "Stan Magazynu":
     with tab_komp:
         st.write("")
         for _, row in st.session_state.komponenty.iterrows():
-            prog_alarmowy = st.session_state.receptura_baza.get(row['ID'], 0) * 20
-            jest_malo = row['Stan'] < prog_alarmowy
+            prog_alarmowy = float(st.session_state.receptura_baza.get(row['ID'], 0)) * 20
+            aktualny_stan = float(row['Stan'])
+            jest_malo = aktualny_stan < prog_alarmowy
             alert = "item-card-alert" if jest_malo else "item-card-ok"
             status_txt = "Niski stan" if jest_malo else "Zabezpieczony"
-            st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {row["Stan"]:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {aktualny_stan:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
 # ==========================================
 # MODUŁ ZAMÓWIENIA (ZK) 
@@ -549,10 +552,10 @@ elif menu == "Zamówienia (ZK)":
                     istnieje = False
                     for item in st.session_state.zk_koszyk:
                         if item["Wariant"] == wybrany_produkt:
-                            item["Ilość (szt.)"] += ilosc
+                            item["Ilość (szt.)"] += int(ilosc)
                             istnieje = True
                             break
-                    if not istnieje: st.session_state.zk_koszyk.append({"Wariant": wybrany_produkt, "Ilość (szt.)": ilosc})
+                    if not istnieje: st.session_state.zk_koszyk.append({"Wariant": wybrany_produkt, "Ilość (szt.)": int(ilosc)})
                     st.rerun()
 
             if st.session_state.zk_koszyk:
@@ -639,7 +642,7 @@ elif menu == "Moduł Production":
         for z in oczekujace:
             for p in z["pozycje"]:
                 wariant = p["Wariant"]
-                zapotrzebowanie[wariant] = zapotrzebowanie.get(wariant, 0) + p["Ilość (szt.)"]
+                zapotrzebowanie[wariant] = zapotrzebowanie.get(wariant, 0) + int(p["Ilość (szt.)"])
                 
         braki_do_oklejenia = []
         braki_do_rozkroju = []
@@ -649,8 +652,9 @@ elif menu == "Moduł Production":
             war_nie = f"GrizoThermo+ {szer}cm - Nieoklejona (13mb)"
             dem_okl = zapotrzebowanie.get(war_okl, 0)
             dem_nie = zapotrzebowanie.get(war_nie, 0)
-            stock_okl = st.session_state.produkty[st.session_state.produkty["Wariant"] == war_okl]["Stan"].values[0]
-            stock_nie = st.session_state.produkty[st.session_state.produkty["Wariant"] == war_nie]["Stan"].values[0]
+            stock_okl = int(st.session_state.produkty[st.session_state.produkty["Wariant"] == war_okl]["Stan"].values[0])
+            stock_nie = int(st.session_state.produkty[st.session_state.produkty["Wariant"] == war_nie]["Stan"].values[0])
+            
             brakuje_okl = max(0, dem_okl - stock_okl)
             brakuje_nie = max(0, dem_nie - stock_nie)
             nadwyzka_nie = max(0, stock_nie - dem_nie)
@@ -700,13 +704,15 @@ elif menu == "Moduł Production":
         potrzeba_jumbo_calkowita = len(plan_rolek)
         s_jumbo_akt = int(st.session_state.polprodukty.at[0, "Stan"])
         brakuje_jumbo = max(0, potrzeba_jumbo_calkowita - s_jumbo_akt)
-        req_alu = brakuje_jumbo * st.session_state.receptura_baza["K01"]
-        req_bia = brakuje_jumbo * st.session_state.receptura_baza["K02"]
-        req_zie = brakuje_jumbo * st.session_state.receptura_baza["K03"]
-        stan_alu = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
-        stan_bia = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K02", "Stan"].values[0]
-        stan_zie = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K03", "Stan"].values[0]
-        gotowe_do_auto = (stan_alu >= req_alu and stan_bia >= req_bia and stan_zie >= req_zie)
+        
+        # Zabezpieczenie przed błędami serializacji w chmurze
+        req_alu = float(brakuje_jumbo * st.session_state.receptura_baza["K01"])
+        req_bia = float(brakuje_jumbo * st.session_state.receptura_baza["K02"])
+        req_zie = float(brakuje_jumbo * st.session_state.receptura_baza["K03"])
+        stan_alu = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0])
+        stan_bia = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K02", "Stan"].values[0])
+        stan_zie = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K03", "Stan"].values[0])
+        gotowe_do_auto = bool(stan_alu >= req_alu and stan_bia >= req_bia and stan_zie >= req_zie)
 
         zliczone_szablony = {}
         for r in plan_rolek:
@@ -715,9 +721,17 @@ elif menu == "Moduł Production":
             else: zliczone_szablony[klucz]["ile"] += 1
                 
         mrp_data = {
-            "braki_okl": braki_do_oklejenia, "braki_nie": braki_do_rozkroju, "potrzeba_jmb": potrzeba_jumbo_calkowita,
-            "s_jumbo_akt": s_jumbo_akt, "brakuje_jumbo": brakuje_jumbo, "req_alu": req_alu, "req_bia": req_bia, "req_zie": req_zie,
-            "szablony": zliczone_szablony, "plan_rolek": plan_rolek, "gotowe_do_auto": gotowe_do_auto
+            "braki_okl": braki_do_oklejenia, 
+            "braki_nie": braki_do_rozkroju, 
+            "potrzeba_jmb": int(potrzeba_jumbo_calkowita),
+            "s_jumbo_akt": int(s_jumbo_akt), 
+            "brakuje_jumbo": int(brakuje_jumbo), 
+            "req_alu": float(req_alu), 
+            "req_bia": float(req_bia), 
+            "req_zie": float(req_zie),
+            "szablony": zliczone_szablony, 
+            "plan_rolek": plan_rolek, 
+            "gotowe_do_auto": bool(gotowe_do_auto)
         }
 
     if "plan_hali_do_pobrania" in st.session_state:
@@ -758,6 +772,19 @@ elif menu == "Moduł Production":
                 st.divider()
                 st.write(f"Łącznie potrzeba: **{mrp_data['potrzeba_jmb']} szt. rolek Jumbo**.")
                 
+                if mrp_data["brakuje_jumbo"] > 0:
+                    st.warning(f"Zlecenia wymagają wytłoczenia dodatkowych **{mrp_data['brakuje_jumbo']} szt.** rolek Jumbo na Maszynie Głównej.")
+                    if mrp_data["gotowe_do_auto"]: st.success("Magazyn surowców w pełni pokrywa zapotrzebowanie.")
+                    else: st.error("BRAK SUROWCÓW do wytłoczenia potrzebnych rolek Jumbo!")
+                
+                if mrp_data["potrzeba_jmb"] > 0:
+                    st.write("")
+                    st.subheader("Zoptymalizowany Plan Konfekcji (KROK 2)")
+                    for i, (_, dane) in enumerate(mrp_data["szablony"].items()):
+                        wzor_txt = " | ".join([f"{qty}x {k.split(' - ')[0].replace('GrizoThermo+ ', '')}" for k, qty in dane["wzor"].items()])
+                        st.markdown(f"**SZABLON {i+1}** (Użyj na **{dane['ile']} szt.** rolek Jumbo): {wzor_txt}")
+                    
+                st.divider()
                 if mrp_data["gotowe_do_auto"]:
                     if st.button("Zatwierdź Plan, wyślij na Halę i generuj PDF", type="primary", use_container_width=True):
                         data_dzis_str = datetime.now().strftime("%Y/%m/%d")
@@ -789,24 +816,32 @@ elif menu == "Moduł Production":
 
     with tab1:
         st.subheader("Wytłaczanie Rolek Jumbo - RĘCZNIE")
-        s_alu_manual = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
-        s_bia_manual = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K02", "Stan"].values[0]
-        s_zie_manual = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K03", "Stan"].values[0]
-        m_alu_m = int(s_alu_manual / st.session_state.receptura_baza["K01"])
-        m_bia_m = int(s_bia_manual / st.session_state.receptura_baza["K02"])
-        m_zie_m = int(s_zie_manual / st.session_state.receptura_baza["K03"])
+        s_alu_manual = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0])
+        s_bia_manual = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K02", "Stan"].values[0])
+        s_zie_manual = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K03", "Stan"].values[0])
+        m_alu_m = int(s_alu_manual / float(st.session_state.receptura_baza["K01"]))
+        m_bia_m = int(s_bia_manual / float(st.session_state.receptura_baza["K02"]))
+        m_zie_m = int(s_zie_manual / float(st.session_state.receptura_baza["K03"]))
         m_jumbo = min(m_alu_m, m_bia_m, m_zie_m)
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Aluminium wystarczy na:", f"{m_alu_m} szt. Jumbo")
+        c2.metric("Barwnik biały wystarczy na:", f"{m_bia_m} szt. Jumbo")
+        c3.metric("Barwnik zielony wystarczy na:", f"{m_zie_m} szt. Jumbo")
+        
         if m_jumbo > 0:
             with st.form("prod_jumbo"):
                 ile_jumbo = st.number_input("Ile Rolek Jumbo wyprodukowano?", min_value=1, max_value=m_jumbo, value=1)
                 if st.form_submit_button("Zaksięguj produkcję (ręcznie)"):
                     data_dzis_str = datetime.now().strftime("%Y/%m/%d")
                     nr_jmb_auto = f"PR-JMB/{data_dzis_str}/{st.session_state.jumbo_counter:03d}"
-                    st.session_state.polprodukty.at[0, "Stan"] += ile_jumbo
-                    dodaj_ruch("PW (Półprod.)", nr_jmb_auto, st.session_state.polprodukty.at[0, "Nazwa"], ile_jumbo, "Wytłaczarka")
+                    st.session_state.polprodukty.at[0, "Stan"] += int(ile_jumbo)
+                    dodaj_ruch("PW (Półprod.)", nr_jmb_auto, st.session_state.polprodukty.at[0, "Nazwa"], int(ile_jumbo), "Wytłaczarka")
                     for k_id, zuzycie in st.session_state.receptura_baza.items():
                         idx = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == k_id][0]
-                        st.session_state.komponenty.at[idx, "Stan"] -= zuzycie * ile_jumbo
+                        laczne_zuzycie = float(zuzycie * ile_jumbo)
+                        st.session_state.komponenty.at[idx, "Stan"] -= laczne_zuzycie
+                        dodaj_ruch("RW", nr_jmb_auto, st.session_state.komponenty.at[idx, "Nazwa"], laczne_zuzycie, "Wytłaczarka")
                     st.session_state.jumbo_counter += 1
                     zapisz_tabele_w_chmurze("Polprodukty")
                     zapisz_tabele_w_chmurze("Komponenty")
@@ -824,8 +859,8 @@ elif menu == "Moduł Production":
             st.session_state.polprodukty.at[0, "Stan"] -= 1
             for idx_nazwa, qty in rozkroj_temp.items():
                 if qty > 0:
-                    st.session_state.produkty.at[idx_nazwa, "Stan"] += qty
-                    dodaj_ruch("PW (Gotowe)", nr_knf_auto, st.session_state.produkty.at[idx_nazwa, 'Wariant'], qty, "Konfekcja")
+                    st.session_state.produkty.at[idx_nazwa, "Stan"] += int(qty)
+                    dodaj_ruch("PW (Gotowe)", nr_knf_auto, st.session_state.produkty.at[idx_nazwa, 'Wariant'], int(qty), "Konfekcja")
             st.session_state.konf_counter += 1
             zapisz_tabele_w_chmurze("Polprodukty")
             zapisz_tabele_w_chmurze("Produkty")
@@ -847,9 +882,9 @@ elif menu == "Moduł Production":
                     nr_okl_auto = f"PR-OKL/{data_dzis_str}/{st.session_state.okl_counter:03d}"
                     idx_nie = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == f"GrizoThermo+ {szerokosc_wybrana}cm - Nieoklejona (13mb)"][0]
                     idx_okl = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == f"GrizoThermo+ {szerokosc_wybrana}cm - Oklejona (13mb)"][0]
-                    st.session_state.produkty.at[idx_nie, "Stan"] -= ile_okleic
-                    st.session_state.produkty.at[idx_okl, "Stan"] += ile_okleic
-                    dodaj_ruch("RW", nr_okl_auto, f"GrizoThermo+ {szerokosc_wybrana}cm - Nieoklejona (13mb)", ile_okleic, "Hala")
+                    st.session_state.produkty.at[idx_nie, "Stan"] -= int(ile_okleic)
+                    st.session_state.produkty.at[idx_okl, "Stan"] += int(ile_okleic)
+                    dodaj_ruch("RW", nr_okl_auto, f"GrizoThermo+ {szerokosc_wybrana}cm - Nieoklejona (13mb)", int(ile_okleic), "Hala")
                     st.session_state.okl_counter += 1
                     zapisz_tabele_w_chmurze("Produkty")
                     st.success("Zakończono.")
@@ -857,45 +892,49 @@ elif menu == "Moduł Production":
 
     with tab4:
         st.subheader("Potwierdzenie Wykonania i Odbiór Towaru z Hali")
-        zlecenia_w_toku = [j for j in st.session_state.zlecenia_produkcyjne if j["status"] == "W toku"]
+        zlecenia_w_toku = [j for j in st.session_state.zlecenia_produkcyjne if str(j.get("status")) == "W toku"]
         if not zlecenia_w_toku: st.info("Brak aktywnych planów na hali.")
         else:
             for job in zlecenia_w_toku:
                 with st.expander(f"📋 Zlecenie: {job['id']} | Powiązane ZK: {', '.join(job['zamowienia_powiazane'])}"):
                     snap = job["mrp_snap"]
-                    if st.button(f" Pelne Potwierdzenie Wykonania Partii {job['id']}", key=f"conf_job_{job['id']}", type="primary", use_container_width=True):
+                    if st.button(f"🟢 POTWIERDŹ ZAKOŃCZENIE ZLECENIA {job['id']}", key=f"conf_job_{job['id']}", type="primary", use_container_width=True):
                         data_dzis_str = datetime.now().strftime("%Y/%m/%d")
                         if snap["brakuje_jumbo"] > 0:
-                            bj = snap["brakuje_jumbo"]
+                            bj = int(snap["brakuje_jumbo"])
                             nr_jmb_auto = f"PR-JMB/{data_dzis_str}/{st.session_state.jumbo_counter:03d}"
                             st.session_state.polprodukty.at[0, "Stan"] += bj
                             dodaj_ruch("PW (Półprod.)", nr_jmb_auto, st.session_state.polprodukty.at[0, "Nazwa"], bj, "Hala-Planer")
                             for k_id, zuzycie in st.session_state.receptura_baza.items():
                                 idx = st.session_state.komponenty.index[st.session_state.komponenty["ID"] == k_id][0]
-                                st.session_state.komponenty.at[idx, "Stan"] -= zuzycie * bj
-                                dodaj_ruch("RW", nr_jmb_auto, st.session_state.komponenty.at[idx, "Nazwa"], zuzycie * bj, "Hala-Planer")
+                                laczne_zuzycie = float(zuzycie * bj)
+                                st.session_state.komponenty.at[idx, "Stan"] -= laczne_zuzycie
+                                dodaj_ruch("RW", nr_jmb_auto, st.session_state.komponenty.at[idx, "Nazwa"], laczne_zuzycie, "Hala-Planer")
                             st.session_state.jumbo_counter += 1
+                            
                         if snap["potrzeba_jmb"] > 0:
-                            pj = snap["potrzeba_jmb"]
+                            pj = int(snap["potrzeba_jmb"])
                             nr_knf_auto = f"PR-KNF/{data_dzis_str}/{st.session_state.konf_counter:03d}"
                             st.session_state.polprodukty.at[0, "Stan"] -= pj
                             dodaj_ruch("RW (Półprod.)", nr_knf_auto, "Rolka Jumbo (115cm x 13mb)", pj, "Hala-Planer")
                             temp_produced = {}
                             for r in snap["plan_rolek"]:
-                                for n, q in r.items(): temp_produced[n] = temp_produced.get(n, 0) + q
+                                for n, q in r.items(): temp_produced[n] = temp_produced.get(n, 0) + int(q)
                             for nazwa_gotowego, total_qty in temp_produced.items():
                                 idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_gotowego][0]
-                                st.session_state.produkty.at[idx, "Stan"] += total_qty
-                                dodaj_ruch("PW (Gotowe)", nr_knf_auto, nazwa_gotowego, total_qty, "Hala-Planer")
+                                st.session_state.produkty.at[idx, "Stan"] += int(total_qty)
+                                dodaj_ruch("PW (Gotowe)", nr_knf_auto, nazwa_gotowego, int(total_qty), "Hala-Planer")
                             st.session_state.konf_counter += 1
+                            
                         if snap["braki_okl"]:
                             nr_okl_auto = f"PR-OKL/{data_dzis_str}/{st.session_state.okl_counter:03d}"
                             for b in snap["braki_okl"]:
                                 idx_nie = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == b["Z_czego"]][0]
                                 idx_okl = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == b["Wariant"]][0]
-                                st.session_state.produkty.at[idx_nie, "Stan"] -= b["Brak_szt"]
-                                st.session_state.produkty.at[idx_okl, "Stan"] += b["Brak_szt"]
+                                st.session_state.produkty.at[idx_nie, "Stan"] -= int(b["Brak_szt"])
+                                st.session_state.produkty.at[idx_okl, "Stan"] += int(b["Brak_szt"])
                             st.session_state.okl_counter += 1
+                            
                         job["status"] = "Zakończone"
                         for zmw in st.session_state.zamowienia:
                             if zmw["id"] in job["zamowienia_powiazane"]: zmw["Status"] = "Gotowe do wydania"
@@ -905,7 +944,7 @@ elif menu == "Moduł Production":
                         zapisz_tabele_w_chmurze("Produkty")
                         zapisz_tabele_w_chmurze("ZleceniaProdukcyjne")
                         zapisz_tabele_w_chmurze("Zamowienia")
-                        st.success("Zrealizowano pomyślnie.")
+                        st.success("Zrealizowano pomyślnie. Towar trafił na magazyn.")
                         st.rerun()
 
 elif menu == "Baza Kontrahentów (CRM)":
@@ -979,8 +1018,8 @@ elif menu == "Przyjęcie Towaru (PZ)":
                 i = st.number_input("Ilość", min_value=0.1, value=100.0)
                 if st.form_submit_button("Zatwierdź"):
                     idx = st.session_state.komponenty.index[st.session_state.komponenty["Nazwa"] == k][0]
-                    st.session_state.komponenty.at[idx, "Stan"] += i
-                    dodaj_ruch("PZ", n, k, i, d)
+                    st.session_state.komponenty.at[idx, "Stan"] += float(i)
+                    dodaj_ruch("PZ", n, k, float(i), d)
                     zapisz_tabele_w_chmurze("Komponenty")
                     st.success("Zapisano.")
                     st.rerun()
@@ -1007,7 +1046,7 @@ elif menu == "Wydanie Towaru (WZ)":
                         z = opcje_zk[wybrane_zk_klucz]
                         st.session_state.wybrany_klient_wz = z["klient"]
                         st.session_state.powiazane_zk = z["id"]
-                        st.session_state.wz_koszyk = [{"Wariant": p["Wariant"], "Ilosc": p["Ilość (szt.)"]} for p in z["pozycje"]]
+                        st.session_state.wz_koszyk = [{"Wariant": p["Wariant"], "Ilosc": int(p["Ilość (szt.)"])} for p in z["pozycje"]]
                         st.rerun()
             wybrany_klient = st.selectbox("Nabywca", odbiorcy)
             uwagi_doc = st.text_input("Uwagi", value="Dostawa z magazynu głównego.")
@@ -1018,7 +1057,7 @@ elif menu == "Wydanie Towaru (WZ)":
                 ile_w = st.number_input("Ilość do wydania", min_value=1, value=1)
                 if st.button("Dodaj do dokumentu"):
                     prawdziwa_nazwa = wybrana_opcja.split(" (Dostępne")[0]
-                    st.session_state.wz_koszyk.append({"Wariant": prawdziwa_nazwa, "Ilosc": ile_w})
+                    st.session_state.wz_koszyk.append({"Wariant": prawdziwa_nazwa, "Ilosc": int(ile_w)})
                     st.rerun()
             if st.session_state.wz_koszyk:
                 st.dataframe(pd.DataFrame(st.session_state.wz_koszyk))
@@ -1033,8 +1072,8 @@ elif menu == "Wydanie Towaru (WZ)":
                         nazwa_w = pozycja["Wariant"]
                         ile_w = pozycja["Ilosc"]
                         idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
-                        st.session_state.produkty.at[idx, "Stan"] -= ile_w
-                        dodaj_ruch("WZ", nr_wz_auto, nazwa_w, ile_w, wybrany_klient)
+                        st.session_state.produkty.at[idx, "Stan"] -= int(ile_w)
+                        dodaj_ruch("WZ", nr_wz_auto, nazwa_w, int(ile_w), wybrany_klient)
                     
                     st.session_state.rejestr_wz.append({
                         "nr_wz": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "klient_nazwa": wybrany_klient,
