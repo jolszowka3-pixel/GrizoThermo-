@@ -18,11 +18,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # ==========================================
 def zaladuj_lub_inicjalizuj_baze():
     """Pobiera dane z chmury. Jeśli arkusz jest całkiem pusty, sam tworzy zakładki i nagłówki."""
-    import json
     
-    # WYMUSZENIE POPRAWNYCH NAGŁÓWKÓW DLA HISTORII (Zabezpieczenie przed KeyError)
-    kolumny_historii = ["Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"]
-
     # 1. Zakładka: Uzytkownicy
     try:
         df_uz = conn.read(worksheet="Uzytkownicy", ttl=0)
@@ -97,18 +93,19 @@ def zaladuj_lub_inicjalizuj_baze():
         conn.update(worksheet="Produkty", data=df_prod)
     st.session_state.produkty = df_prod
 
-    # 6. Zakładka: Historia
+    # 6. Zakładka: Historia (Kluczowa poprawka)
     try:
         df_hist = conn.read(worksheet="Historia", ttl=0)
         if df_hist.empty or "Typ" not in df_hist.columns: raise Exception()
     except:
-        df_hist = pd.DataFrame(columns=kolumny_historii)
+        df_hist = pd.DataFrame(columns=["Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"])
         conn.update(worksheet="Historia", data=df_hist)
     st.session_state.historia = df_hist
 
     # 7. Zakładka: Zamowienia
     try:
         df_zam = conn.read(worksheet="Zamowienia", ttl=0)
+        if df_zam.empty or "ID" not in df_zam.columns: raise Exception()
         zam_list = []
         for _, row_z in df_zam.iterrows():
             try: pozycje_data = json.loads(row_z['Pozycje'])
@@ -126,6 +123,7 @@ def zaladuj_lub_inicjalizuj_baze():
     # 8. Zakładka: ZleceniaProdukcyjne (Karta pracy Kroku 4)
     try:
         df_zl = conn.read(worksheet="ZleceniaProdukcyjne", ttl=0)
+        if df_zl.empty or "ID" not in df_zl.columns: raise Exception()
         zl_list = []
         for _, row_l in df_zl.iterrows():
             try: snap = json.loads(row_l['MrpSnap'])
@@ -145,6 +143,7 @@ def zaladuj_lub_inicjalizuj_baze():
     # 9. Zakładka: RejestrWZ
     try:
         df_rwz = conn.read(worksheet="RejestrWZ", ttl=0)
+        if df_rwz.empty or "NrWz" not in df_rwz.columns: raise Exception()
         rwz_list = []
         for _, row_w in df_rwz.iterrows():
             try: poz = json.loads(row_w['Pozycje'])
@@ -159,12 +158,11 @@ def zaladuj_lub_inicjalizuj_baze():
         df_dummy = pd.DataFrame(columns=["NrWz", "Data", "KlientNazwa", "KlientAdres", "KlientNip", "Pozycje", "Uwagi"])
         conn.update(worksheet="RejestrWZ", data=df_dummy)
 
-    # Bezpieczne przeliczenie liczników operacyjnych z chmury
+    # Bezpieczne przeliczenie liczników operacyjnych
     st.session_state.zk_counter = len(st.session_state.zamowienia) + 1
     st.session_state.wz_counter = len(st.session_state.rejestr_wz) + 1
     st.session_state.pr_counter = len(st.session_state.zlecenia_produkcyjne) + 1
     
-    # Bezpieczne sprawdzenie kolumn w historii
     if not st.session_state.historia.empty and "Typ" in st.session_state.historia.columns:
         st.session_state.jumbo_counter = len(st.session_state.historia[st.session_state.historia["Typ"] == "PW (Półprod.)"]) + 1
         st.session_state.konf_counter = len(st.session_state.historia[st.session_state.historia["Typ"] == "PW (Gotowe)"]) + 1
@@ -341,8 +339,9 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-if 'init_v49' not in st.session_state:
-    st.session_state.init_v49 = True
+# ZMIANA: init_v50 w celu wyczyszczenia zablokowanej w tle sesji Streamlita!
+if 'init_v50' not in st.session_state:
+    st.session_state.init_v50 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -353,6 +352,7 @@ if 'init_v49' not in st.session_state:
     st.session_state.wybrany_klient_wz = None
     st.session_state.receptura_baza = {"K01": 32.00, "K02": 0.200, "K03": 0.100}
     
+    # WYWOŁANIE POBIERANIA I SAMOINICJALIZACJI W CHMURZE
     zaladuj_lub_inicjalizuj_baze()
 
 def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
@@ -779,7 +779,7 @@ elif menu == "Moduł Production":
                             "zamowienia_powiazane": [z["id"] for z in oczekujace], "status": "W toku"
                         })
                         st.session_state.pr_counter += 1
-                        for z in oczekujace: z["Status"] = "W knittingu" if "W knittingu" in st.session_state else "W produkcji"
+                        for z in oczekujace: z["Status"] = "W produkcji"
                             
                         zapisz_tabele_w_chmurze("ZleceniaProdukcyjne")
                         zapisz_tabele_w_chmurze("Zamowienia")
@@ -863,7 +863,7 @@ elif menu == "Moduł Production":
                     dodaj_ruch("RW", nr_okl_auto, f"GrizoThermo+ {szerokosc_wybrana}cm - Nieoklejona (13mb)", ile_okleic, "Hala")
                     st.session_state.okl_counter += 1
                     zapisz_tabele_w_chmurze("Produkty")
-                    st.success("Zacząłeś oklejanie.")
+                    st.success("Zakończono.")
                     st.rerun()
 
     with tab4:
@@ -941,7 +941,7 @@ elif menu == "Baza Kontrahentów (CRM)":
                     if c_edit.button("✏️", key=f"edit_btn_{idx}"): st.session_state.crm_edycja_id = idx; st.rerun()
                     if c_del.button("🗑️", key=f"del_btn_{idx}"):
                         st.session_state.kontrahenci = st.session_state.kontrahenci.drop(idx).reset_index(drop=True)
-                        zapisz_tabele_w_chmurze("Kontrahenci")
+                        zapisz_tabele_w_chmurze("Kontrahentci")
                         st.rerun()
         if st.session_state.crm_edycja_id is not None:
             idx_do_edycji = st.session_state.crm_edycja_id
