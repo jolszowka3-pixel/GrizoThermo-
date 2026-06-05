@@ -77,11 +77,12 @@ def zaladuj_lub_inicjalizuj_baze():
         }
     st.session_state.uzytkownicy = uzytkownicy_dict
 
-    # 2. Zakładka: Kontrahenci
+    # 2. Zakładka: Kontrahenci (ZMIANA: System całkowicie bazuje na chmurze, bez zmyślonych firm)
     try:
         df_kon = conn.read(worksheet="Kontrahenci", ttl=0)
         cols_lower = [str(c).strip().lower() for c in df_kon.columns]
-        if df_kon.empty or "nazwa" not in cols_lower: raise Exception()
+        # Błąd wyrzucamy TYLKO gdy brakuje nagłówka "nazwa". Pusta tabela to poprawna tabela!
+        if "nazwa" not in cols_lower: raise Exception() 
         
         # Ochrona NIPu przed notacją naukową
         for col in df_kon.columns:
@@ -89,11 +90,7 @@ def zaladuj_lub_inicjalizuj_baze():
                 df_kon[col] = df_kon[col].apply(bezpieczny_str)
         st.session_state.kontrahenci = df_kon
     except:
-        st.session_state.kontrahenci = pd.DataFrame([
-            {"Nazwa": "Hurtownia Surowców ALUSTAR", "NIP": "1112223344", "Adres": "ul. Hutnicza 10, 40-001 Katowice", "Typ": "Dostawca"},
-            {"Nazwa": "Chemia Przemysłowa Sp. z o.o.", "NIP": "9998887766", "Adres": "ul. Barwna 5, 01-234 Warszawa", "Typ": "Dostawca"},
-            {"Nazwa": "Bud-Max Materiały Budowlane", "NIP": "5554443322", "Adres": "ul. Wrocławska 100, 30-001 Kraków", "Typ": "Odbiorca"}
-        ])
+        st.session_state.kontrahenci = pd.DataFrame(columns=["Nazwa", "NIP", "Adres", "Typ"])
 
     # 3. Zakładka: Komponenty (Surowce)
     try:
@@ -217,7 +214,6 @@ def zaladuj_lub_inicjalizuj_baze():
     st.session_state.wz_counter = len(st.session_state.rejestr_wz) + 1
     st.session_state.pr_counter = len(st.session_state.zlecenia_produkcyjne) + 1
     
-    # Bezpieczne znajdowanie kolumny Typ w historii dla liczników
     kolumna_typ = None
     if not st.session_state.historia.empty:
         for c in st.session_state.historia.columns:
@@ -402,9 +398,9 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-# ZMIANA: init_v54 - wymusza odświeżenie i wczytanie poprawionych uprawnień
-if 'init_v54' not in st.session_state:
-    st.session_state.init_v54 = True
+# ZMIANA: init_v55 dla wymuszenia przeładowania CRM!
+if 'init_v55' not in st.session_state:
+    st.session_state.init_v55 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -1026,10 +1022,15 @@ elif menu == "Baza Kontrahentów (CRM)":
     with tab_przeglad:
         filtr_typ = st.radio("Filtruj:", ["Wszystkie podmioty", "Klienci (Odbiorcy)", "Dostawcy surowców"], horizontal=True)
         df_crm = st.session_state.kontrahenci.copy()
-        if filtr_typ == "Klienci (Odbiorcy)": df_crm = df_crm[df_crm["Typ"] == "Odbiorca"]
-        elif filtr_typ == "Dostawcy surowców": df_crm = df_crm[df_crm["Typ"] == "Dostawca"]
-            
+        
+        # Jeśli z chmury pobrano pustą tabelę z nagłówkami, to "empty" złapie, by nie wywalić błędu iteracji
         if not df_crm.empty:
+            if filtr_typ == "Klienci (Odbiorcy)": df_crm = df_crm[df_crm["Typ"] == "Odbiorca"]
+            elif filtr_typ == "Dostawcy surowców": df_crm = df_crm[df_crm["Typ"] == "Dostawca"]
+            
+        if df_crm.empty:
+            st.info("Brak podmiotów spełniających wybrane kryteria.")
+        else:
             for idx, row in df_crm.iterrows():
                 col_dane, col_akcje = st.columns([4, 1])
                 with col_dane:
@@ -1075,25 +1076,31 @@ elif menu == "Baza Kontrahentów (CRM)":
                     zapisz_tabele_w_chmurze("Kontrahenci")
                     st.success("Zapisano.")
                     st.rerun()
+                else: st.error("Pola 'Nazwa firmy' oraz 'Adres siedziby' są obowiązkowe.")
 
 elif menu == "Przyjęcie Towaru (PZ)":
     st.header("Przyjęcie Zewnętrzne (PZ)")
     tab_nowe_pz, tab_rejestr_pz = st.tabs(["Wprowadź Dokument PZ", "🗂️ Rejestr Dokumentów PZ"])
     with tab_nowe_pz:
-        dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]["Nazwa"].tolist()
-        if dostawcy:
-            with st.form("pz"):
-                n = st.text_input("Numer dokumentu")
-                d = st.selectbox("Dostawca", dostawcy)
-                k = st.selectbox("Surowiec", st.session_state.komponenty["Nazwa"].tolist())
-                i = st.number_input("Ilość", min_value=0.1, value=100.0)
-                if st.form_submit_button("Zatwierdź"):
-                    idx = st.session_state.komponenty.index[st.session_state.komponenty["Nazwa"] == k][0]
-                    st.session_state.komponenty.at[idx, "Stan"] += float(i)
-                    dodaj_ruch("PZ", n, k, float(i), d)
-                    zapisz_tabele_w_chmurze("Komponenty")
-                    st.success("Zapisano.")
-                    st.rerun()
+        if st.session_state.kontrahenci.empty:
+            st.error("Brak dostawców w CRM.")
+        else:
+            dostawcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Dostawca"]["Nazwa"].tolist()
+            if dostawcy:
+                with st.form("pz"):
+                    n = st.text_input("Numer dokumentu")
+                    d = st.selectbox("Dostawca", dostawcy)
+                    k = st.selectbox("Surowiec", st.session_state.komponenty["Nazwa"].tolist())
+                    i = st.number_input("Ilość", min_value=0.1, value=100.0)
+                    if st.form_submit_button("Zatwierdź"):
+                        idx = st.session_state.komponenty.index[st.session_state.komponenty["Nazwa"] == k][0]
+                        st.session_state.komponenty.at[idx, "Stan"] += float(i)
+                        dodaj_ruch("PZ", n, k, float(i), d)
+                        zapisz_tabele_w_chmurze("Komponenty")
+                        st.success("Zapisano.")
+                        st.rerun()
+            else:
+                st.error("Brak dostawców w CRM.")
     with tab_rejestr_pz:
         df_pz = st.session_state.historia[st.session_state.historia["Typ"] == "PZ"]
         if not df_pz.empty: st.dataframe(df_pz.sort_values(by="Data", ascending=False), use_container_width=True, hide_index=True)
@@ -1102,7 +1109,12 @@ elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     tab_nowe_wz, tab_rejestr_wz = st.tabs(["Wprowadź Dokument WZ", "🗂️ Rejestr Dokumentów WZ / Ponowny Wydruk"])
     with tab_nowe_wz:
-        odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
+        if st.session_state.kontrahenci.empty:
+            st.warning("Brak odbiorców w bazie danych CRM.")
+            odbiorcy = []
+        else:
+            odbiorcy = st.session_state.kontrahenci[st.session_state.kontrahenci["Typ"] == "Odbiorca"]["Nazwa"].tolist()
+            
         if "wz_pdf_do_pobrania" in st.session_state:
             st.success("Zatwierdzono wydanie. Pobierz dokument WZ poniżej:")
             st.download_button(label="📥 Pobierz Dokument WZ (PDF)", data=st.session_state.wz_pdf_do_pobrania["data"], file_name=st.session_state.wz_pdf_do_pobrania["nazwa"], mime="application/pdf", type="primary", use_container_width=True)
