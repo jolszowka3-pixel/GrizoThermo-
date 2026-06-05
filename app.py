@@ -19,20 +19,18 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def bezpieczny_str(wartosc):
     if pd.isna(wartosc): return ""
     val = str(wartosc).strip()
-    if val.endswith(".0"): return val[:-2] # Ucinanie ułamków z haseł i NIP-ów
+    if val.endswith(".0"): return val[:-2]
     return val
 
 def bezpieczny_bool(wartosc, domyslna=False):
     if pd.isna(wartosc): return domyslna
     if isinstance(wartosc, bool): return wartosc
     txt = str(wartosc).strip().upper()
-    # Tłumaczenie na Polski i angielski (ochrona przed polskim Google Sheets)
     if txt in ["TRUE", "PRAWDA", "TAK", "YES", "1", "1.0"]: return True
     if txt in ["FALSE", "FAŁSZ", "FALSZ", "NIE", "NO", "0", "0.0", ""]: return False
     return domyslna
 
 def get_col(row, col_name, domyslna=None):
-    """Pobiera wartość z kolumny ignorując wielkość liter i spacje w nagłówkach"""
     for c in row.index:
         if str(c).strip().lower() == col_name.strip().lower():
             return row[c]
@@ -42,7 +40,6 @@ def get_col(row, col_name, domyslna=None):
 # FUNKCJE CHMUROWE (ODCZYT / BAZA GOOGLE)
 # ==========================================
 def zaladuj_lub_inicjalizuj_baze():
-    """Pobiera dane z chmury i zabezpiecza formaty komórek."""
     kolumny_historii = ["Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"]
 
     # 1. Zakładka: Uzytkownicy
@@ -144,9 +141,7 @@ def zaladuj_lub_inicjalizuj_baze():
         for _, row_z in df_zam.iterrows():
             try: pozycje_data = json.loads(get_col(row_z, 'pozycje', '[]'))
             except: pozycje_data = []
-            
             uwagi_val = get_col(row_z, 'uwagi', '')
-            
             zam_list.append({
                 "id": bezpieczny_str(get_col(row_z, 'id')), 
                 "data": bezpieczny_str(get_col(row_z, 'data')), 
@@ -190,9 +185,7 @@ def zaladuj_lub_inicjalizuj_baze():
         for _, row_w in df_rwz.iterrows():
             try: poz = json.loads(get_col(row_w, 'pozycje', '[]'))
             except: poz = []
-            
             uwagi_val = get_col(row_w, 'uwagi', '')
-            
             rwz_list.append({
                 "nr_wz": bezpieczny_str(get_col(row_w, 'nrwz')), 
                 "data": bezpieczny_str(get_col(row_w, 'data')), 
@@ -206,7 +199,7 @@ def zaladuj_lub_inicjalizuj_baze():
     except:
         st.session_state.rejestr_wz = []
 
-    # Bezpieczne przeliczenie liczników operacyjnych z chmury
+    # Liczniki operacyjne z chmury
     st.session_state.zk_counter = len(st.session_state.zamowienia) + 1
     st.session_state.wz_counter = len(st.session_state.rejestr_wz) + 1
     st.session_state.pr_counter = len(st.session_state.zlecenia_produkcyjne) + 1
@@ -214,9 +207,7 @@ def zaladuj_lub_inicjalizuj_baze():
     kolumna_typ = None
     if not st.session_state.historia.empty:
         for c in st.session_state.historia.columns:
-            if str(c).strip().lower() == "typ":
-                kolumna_typ = c
-                break
+            if str(c).strip().lower() == "typ": kolumna_typ = c; break
                 
     if kolumna_typ:
         st.session_state.jumbo_counter = len(st.session_state.historia[st.session_state.historia[kolumna_typ] == "PW (Półprod.)"]) + 1
@@ -230,56 +221,38 @@ def zaladuj_lub_inicjalizuj_baze():
 def zapisz_tabele_w_chmurze(nazwa_tabeli):
     """Wysyła zaktualizowane dane z sesji bezpośrednio do Arkusza Google"""
     try:
-        if nazwa_tabeli == "Komponenty":
-            conn.update(worksheet="Komponenty", data=st.session_state.komponenty)
-        elif nazwa_tabeli == "Polprodukty":
-            conn.update(worksheet="Polprodukty", data=st.session_state.polprodukty)
-        elif nazwa_tabeli == "Produkty":
-            conn.update(worksheet="Produkty", data=st.session_state.produkty)
-        elif nazwa_tabeli == "Kontrahenci":
-            conn.update(worksheet="Kontrahenci", data=st.session_state.kontrahenci)
-        elif nazwa_tabeli == "Historia":
-            conn.update(worksheet="Historia", data=st.session_state.historia)
+        if nazwa_tabeli == "Komponenty": conn.update(worksheet="Komponenty", data=st.session_state.komponenty)
+        elif nazwa_tabeli == "Polprodukty": conn.update(worksheet="Polprodukty", data=st.session_state.polprodukty)
+        elif nazwa_tabeli == "Produkty": conn.update(worksheet="Produkty", data=st.session_state.produkty)
+        elif nazwa_tabeli == "Kontrahenci": conn.update(worksheet="Kontrahenci", data=st.session_state.kontrahenci)
+        elif nazwa_tabeli == "Historia": conn.update(worksheet="Historia", data=st.session_state.historia)
         elif nazwa_tabeli == "Uzytkownicy":
             rows = []
             for log, dane in st.session_state.uzytkownicy.items():
                 rows.append({
                     "Login": log, "Haslo": dane["haslo"], "Imie": dane["imie"],
-                    "pulpit": dane["uprawnienia"].get("pulpit", True),
-                    "magazyn": dane["uprawnienia"].get("magazyn", True),
-                    "zk": dane["uprawnienia"].get("zk", False),
-                    "produkcja": dane["uprawnienia"].get("produkcja", False),
-                    "pz": dane["uprawnienia"].get("pz", False),
-                    "wz": dane["uprawnienia"].get("wz", False),
-                    "crm": dane["uprawnienia"].get("crm", False),
-                    "admin": dane["uprawnienia"].get("admin", False)
+                    "pulpit": dane["uprawnienia"].get("pulpit", True), "magazyn": dane["uprawnienia"].get("magazyn", True),
+                    "zk": dane["uprawnienia"].get("zk", False), "produkcja": dane["uprawnienia"].get("produkcja", False),
+                    "pz": dane["uprawnienia"].get("pz", False), "wz": dane["uprawnienia"].get("wz", False),
+                    "crm": dane["uprawnienia"].get("crm", False), "admin": dane["uprawnienia"].get("admin", False)
                 })
             conn.update(worksheet="Uzytkownicy", data=pd.DataFrame(rows))
         elif nazwa_tabeli == "Zamowienia":
             rows = []
             for z in st.session_state.zamowienia:
-                rows.append({
-                    "ID": z["id"], "Data": z["data"], "Klient": z["klient"],
-                    "Pozycje": json.dumps(z["pozycje"]), "Uwagi": z["uwagi"], "Status": z["Status"]
-                })
+                rows.append({"ID": z["id"], "Data": z["data"], "Klient": z["klient"], "Pozycje": json.dumps(z["pozycje"]), "Uwagi": z["uwagi"], "Status": z["Status"]})
             df_to_save = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["ID", "Data", "Klient", "Pozycje", "Uwagi", "Status"])
             conn.update(worksheet="Zamowienia", data=df_to_save)
         elif nazwa_tabeli == "ZleceniaProdukcyjne":
             rows = []
             for j in st.session_state.zlecenia_produkcyjne:
-                rows.append({
-                    "ID": j["id"], "Data": j["data"], "MrpSnap": json.dumps(j["mrp_snap"]),
-                    "ZamowieniaPowiazane": json.dumps(j["zamowienia_powiazane"]), "Status": j["status"]
-                })
+                rows.append({"ID": j["id"], "Data": j["data"], "MrpSnap": json.dumps(j["mrp_snap"]), "ZamowieniaPowiazane": json.dumps(j["zamowienia_powiazane"]), "Status": j["status"]})
             df_to_save = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["ID", "Data", "MrpSnap", "ZamowieniaPowiazane", "Status"])
             conn.update(worksheet="ZleceniaProdukcyjne", data=df_to_save)
         elif nazwa_tabeli == "RejestrWZ":
             rows = []
             for d in st.session_state.rejestr_wz:
-                rows.append({
-                    "NrWz": d["nr_wz"], "Data": d["data"], "KlientNazwa": d["klient_nazwa"],
-                    "KlientAdres": d["klient_adres"], "KlientNip": d["klient_nip"], "Pozycje": json.dumps(d["pozycje"]), "Uwagi": d["uwagi"]
-                })
+                rows.append({"NrWz": d["nr_wz"], "Data": d["data"], "KlientNazwa": d["klient_nazwa"], "KlientAdres": d["klient_adres"], "KlientNip": d["klient_nip"], "Pozycje": json.dumps(d["pozycje"]), "Uwagi": d["uwagi"]})
             df_to_save = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["NrWz", "Data", "KlientNazwa", "KlientAdres", "KlientNip", "Pozycje", "Uwagi"])
             conn.update(worksheet="RejestrWZ", data=df_to_save)
     except Exception as e:
@@ -304,12 +277,10 @@ def pobierz_czcionki():
     reg_path = "Roboto-Regular.ttf"
     bold_path = "Roboto-Bold.ttf"
     if not os.path.exists(reg_path):
-        try:
-            urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf", reg_path)
+        try: urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf", reg_path)
         except: pass
     if not os.path.exists(bold_path):
-        try:
-            urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf", bold_path)
+        try: urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf", bold_path)
         except: pass
     return reg_path, bold_path
 
@@ -395,8 +366,8 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-if 'init_v56' not in st.session_state:
-    st.session_state.init_v56 = True
+if 'init_v57' not in st.session_state:
+    st.session_state.init_v57 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -406,8 +377,19 @@ if 'init_v56' not in st.session_state:
     st.session_state.powiazane_zk = None
     st.session_state.wybrany_klient_wz = None
     st.session_state.receptura_baza = {"K01": 32.00, "K02": 0.200, "K03": 0.100}
-    
     zaladuj_lub_inicjalizuj_baze()
+
+# ==========================================
+# ZAAWANSOWANY SILNIK REZERWACJI TOWARU
+# ==========================================
+rezerwacje_systemowe = {}
+for z in st.session_state.zamowienia:
+    if z["Status"] in ["Czeka na realizację", "W produkcji", "Gotowe do wydania"]:
+        for p in z["pozycje"]:
+            wariant = p.get("Wariant", "")
+            if wariant:
+                qty = int(p.get("Ilość (szt.)", p.get("Ilosc", 0)))
+                rezerwacje_systemowe[wariant] = rezerwacje_systemowe.get(wariant, 0) + qty
 
 def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
     uzytkownik = st.session_state.aktualny_uzytkownik if st.session_state.aktualny_uzytkownik else "System"
@@ -490,31 +472,24 @@ if st.sidebar.button("🔄 Wymuś synchronizację z chmurą"):
     st.rerun()
 
 # ==========================================
-# MODUŁ 1: PULPIT GŁÓWNY (DASHBOARD) - NOWY CZYSTY WYGLĄD
+# MODUŁ 1: PULPIT GŁÓWNY (DASHBOARD)
 # ==========================================
 if menu == "Pulpit Główny":
     st.header("Pulpit Zarządzania: GrizoThermo+")
     
-    # --- OBLICZENIA ---
-    # 1. Ilość rolek Jumbo na stanie
     stan_jumbo = int(st.session_state.polprodukty.loc[0, "Stan"])
     
-    # 2. Ile maksymalnie jesteśmy w stanie wyprodukować z obecnych surowców (wąskie gardło)
     s_alu = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0])
     s_bia = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K02", "Stan"].values[0])
     s_zie = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K03", "Stan"].values[0])
-    
     rec_alu = float(st.session_state.receptura_baza["K01"])
     rec_bia = float(st.session_state.receptura_baza["K02"])
     rec_zie = float(st.session_state.receptura_baza["K03"])
-    
     potencjal_jumbo = int(min(s_alu / rec_alu, s_bia / rec_bia, s_zie / rec_zie))
     
-    # 3. Aktywne zamówienia
     aktywne_zk = [z for z in st.session_state.zamowienia if z["Status"] != "Zrealizowane"]
     ile_aktywnych = len(aktywne_zk)
 
-    # 4. Alerty surowcowe (czy starczy na 10 rolek Jumbo)
     braki_na_10 = []
     for _, row_k in st.session_state.komponenty.iterrows():
         prog_10_szt = float(st.session_state.receptura_baza.get(row_k['ID'], 0)) * 10
@@ -523,9 +498,6 @@ if menu == "Pulpit Główny":
             brakuje = prog_10_szt - aktualny_stan
             braki_na_10.append(f"**{row_k['Nazwa']}** (Brakuje {brakuje:g} {row_k['Jednostka']} do bezpiecznego minimum 10 szt.)")
 
-    # --- WYŚWIETLANIE ---
-    
-    # Pasek alertu na samej górze
     if braki_na_10:
         st.error("⚠️ **ALERT SUROWCOWY:** Brakuje surowców do wyprodukowania 10 szt. rolek Jumbo!\n\n" + "\n".join([f"- {b}" for b in braki_na_10]))
     else:
@@ -533,7 +505,6 @@ if menu == "Pulpit Główny":
 
     st.divider()
     
-    # Główne kafelki
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="card-details">Rzeczywisty stan magazynu</div><div style="font-size: 1.8rem; font-weight: 700;">{stan_jumbo} <span style="font-size: 1rem; color: #6b7280;">rolek Jumbo</span></div></div>', unsafe_allow_html=True)
@@ -542,26 +513,23 @@ if menu == "Pulpit Główny":
 
     st.write("")
     
-    # Lista obecnych zamówień
     st.subheader(f"🛒 Obecne zamówienia do realizacji ({ile_aktywnych})")
     if not aktywne_zk:
         st.info("Brak aktywnych zamówień. Wszystko zostało zrealizowane i wydane klientom.")
     else:
-        # Prezentacja w formie przejrzystej tabeli
         df_aktywne = pd.DataFrame([{
             "Nr Zamówienia": z["id"], 
             "Firma zamawiająca": z["klient"], 
             "Status na produkcji": z["Status"]
         } for z in aktywne_zk])
-        
         st.dataframe(df_aktywne, use_container_width=True, hide_index=True)
 
 # ==========================================
-# MODUŁ 2: STAN MAGAZYNU
+# MODUŁ 2: STAN MAGAZYNU (Rezerwacje)
 # ==========================================
 elif menu == "Stan Magazynu":
     st.header("Ewidencja Stanów Magazynowych")
-    st.write("Podgląd fizycznego asortymentu, półproduktów oraz komponentów w przedsiębiorstwie.")
+    st.write("Szczegółowy podgląd towaru dostępnego do sprzedaży vs fizycznie na regale.")
     
     tab_prod, tab_polprod, tab_komp = st.tabs([
         "Magazyn Wyrobów Gotowych", "Magazyn Półproduktów (Jumbo)", "Magazyn Surowców Bazowych"
@@ -571,8 +539,24 @@ elif menu == "Stan Magazynu":
         pokaz_wszystkie = st.checkbox("Wyświetl warianty z zerowym stanem magazynowym", value=True)
         st.write("")
         for _, row in st.session_state.produkty.iterrows():
-            if float(row['Stan']) > 0 or pokaz_wszystkie:
-                st.markdown(f'<div class="item-card"><div class="card-title">{row["Wariant"]}</div><div class="card-details">Szerokość handlowa: {row["Szerokosc"]} cm | Stan: {int(row["Stan"])} szt.</div></div>', unsafe_allow_html=True)
+            wariant = row["Wariant"]
+            stan_fizyczny = int(row["Stan"])
+            zarezerwowano = rezerwacje_systemowe.get(wariant, 0)
+            dostepne = stan_fizyczny - zarezerwowano
+            
+            if stan_fizyczny > 0 or zarezerwowano > 0 or pokaz_wszystkie:
+                kolor_dost = "#dc2626" if dostepne < 0 else "#16a34a"
+                st.markdown(f'''
+                <div class="item-card">
+                    <div class="card-title">{wariant}</div>
+                    <div class="card-details" style="margin-bottom: 8px;">Szerokość handlowa: {row["Szerokosc"]} cm</div>
+                    <div style="display: flex; gap: 20px; font-size: 0.95rem; background-color: #f9fafb; padding: 10px; border-radius: 4px;">
+                        <div style="color: #4b5563;">📦 Stan fizyczny na regale: <b style="color: #1f2937;">{stan_fizyczny} szt.</b></div>
+                        <div style="color: #4b5563;">🔒 Rezerwacje pod ZK: <b style="color: #ea580c;">{zarezerwowano} szt.</b></div>
+                        <div style="color: {kolor_dost}; font-weight: 600;">✅ Dostępne od ręki: {dostepne} szt.</div>
+                    </div>
+                </div>
+                ''', unsafe_allow_html=True)
 
     with tab_polprod:
         st.write("")
@@ -590,7 +574,7 @@ elif menu == "Stan Magazynu":
             st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {aktualny_stan:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
 # ==========================================
-# MODUŁ ZAMÓWIENIA (ZK) 
+# MODUŁ ZAMÓWIENIA (ZK) - Blokada koszyka na dostępne
 # ==========================================
 elif menu == "Zamówienia (ZK)":
     st.header("Zamówienia Klientów (ZK)")
@@ -623,21 +607,27 @@ elif menu == "Zamówienia (ZK)":
             
             st.divider()
             st.subheader("Dodaj produkty do zamówienia")
-            lista_produktow = st.session_state.produkty["Wariant"].tolist()
+            
+            lista_produktow_do_wyboru = []
+            for _, row in st.session_state.produkty.iterrows():
+                wariant = row["Wariant"]
+                dostepne = int(row["Stan"]) - rezerwacje_systemowe.get(wariant, 0)
+                lista_produktow_do_wyboru.append(f"{wariant} (Dostępne od ręki: {dostepne} szt.)")
             
             col_p1, col_p2, col_p3 = st.columns([3, 1, 1])
-            with col_p1: wybrany_produkt = st.selectbox("Wybierz asortyment", lista_produktow, key="zk_prod_sel")
+            with col_p1: wybrana_opcja_zk = st.selectbox("Wybierz asortyment", lista_produktow_do_wyboru, key="zk_prod_sel")
             with col_p2: ilosc = st.number_input("Ilość (szt.)", min_value=1, value=1, step=1, key="zk_ilosc_in")
             with col_p3:
                 st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                 if st.button("Dodaj do zamówienia", use_container_width=True):
+                    prawdziwa_nazwa_z_listy = wybrana_opcja_zk.split(" (Dostępne")[0]
                     istnieje = False
                     for item in st.session_state.zk_koszyk:
-                        if item["Wariant"] == wybrany_produkt:
+                        if item["Wariant"] == prawdziwa_nazwa_z_listy:
                             item["Ilość (szt.)"] += int(ilosc)
                             istnieje = True
                             break
-                    if not istnieje: st.session_state.zk_koszyk.append({"Wariant": wybrany_produkt, "Ilość (szt.)": int(ilosc)})
+                    if not istnieje: st.session_state.zk_koszyk.append({"Wariant": prawdziwa_nazwa_z_listy, "Ilość (szt.)": int(ilosc)})
                     st.rerun()
 
             if st.session_state.zk_koszyk:
@@ -949,15 +939,26 @@ elif menu == "Moduł Production":
             st.rerun()
 
     with tab3:
-        st.subheader("Oklejanie - RĘCZNIE")
-        df_nieokl_dostepne = st.session_state.produkty[(st.session_state.produkty['Wariant'].str.contains("Nieoklejona")) & (st.session_state.produkty['Stan'] > 0)]
-        if not df_nieokl_dostepne.empty:
+        st.subheader("Oklejanie - RĘCZNIE (Zabezpieczone rezerwacjami)")
+        dostepne_do_oklejenia = []
+        for _, r in st.session_state.produkty.iterrows():
+            if "Nieoklejona" in r['Wariant']:
+                wariant_nieokl = r['Wariant']
+                stan_fiz = int(r['Stan'])
+                zarezerw = rezerwacje_systemowe.get(wariant_nieokl, 0)
+                wolne = stan_fiz - zarezerw
+                if wolne > 0:
+                    dostepne_do_oklejenia.append({"Wariant": wariant_nieokl, "Dostepne": wolne, "Szerokosc": int(r['Szerokosc'])})
+                    
+        if not dostepne_do_oklejenia:
+            st.info("Brak wolnych (niezarezerwowanych) rolek nieoklejonych na magazynie, by przesłać je na okleiniarkę.")
+        else:
             with st.form("form_oklejanie"):
-                opcje_okl = [f"{int(r['Szerokosc'])}cm (Dostępne: {int(r['Stan'])} szt.)" for _, r in df_nieokl_dostepne.iterrows()]
-                wybrana_opcja = st.selectbox("Wybierz szerokość:", opcje_okl)
+                opcje_okl = [f"{x['Szerokosc']}cm (Wolne szt.: {x['Dostepne']})" for x in dostepne_do_oklejenia]
+                wybrana_opcja = st.selectbox("Wybierz szerokość do oklejenia:", opcje_okl)
                 szerokosc_wybrana = int(wybrana_opcja.split("cm")[0])
-                max_dost = int(wybrana_opcja.split("Dostępne: ")[1].split(" szt")[0])
-                ile_okleic = st.number_input("Ilość:", min_value=1, max_value=max_dost, value=1)
+                max_dost = int(wybrana_opcja.split("Wolne szt.: ")[1].split(")")[0])
+                ile_okleic = st.number_input("Ilość do oklejenia:", min_value=1, max_value=max_dost, value=1)
                 if st.form_submit_button("Zatwierdź oklejanie"):
                     data_dzis_str = datetime.now().strftime("%Y/%m/%d")
                     nr_okl_auto = f"PR-OKL/{data_dzis_str}/{st.session_state.okl_counter:03d}"
@@ -968,7 +969,7 @@ elif menu == "Moduł Production":
                     dodaj_ruch("RW", nr_okl_auto, f"GrizoThermo+ {szerokosc_wybrana}cm - Nieoklejona (13mb)", int(ile_okleic), "Hala")
                     st.session_state.okl_counter += 1
                     zapisz_tabele_w_chmurze("Produkty")
-                    st.success("Zakończono.")
+                    st.success("Zakończono. Towar został przeksiegowany na wariant oklejony.")
                     st.rerun()
 
     with tab4:
@@ -1132,6 +1133,7 @@ elif menu == "Wydanie Towaru (WZ)":
             st.success("Zatwierdzono wydanie. Pobierz dokument WZ poniżej:")
             st.download_button(label="📥 Pobierz Dokument WZ (PDF)", data=st.session_state.wz_pdf_do_pobrania["data"], file_name=st.session_state.wz_pdf_do_pobrania["nazwa"], mime="application/pdf", type="primary", use_container_width=True)
             if st.button("Zamknij powiadomienie", use_container_width=True): del st.session_state.wz_pdf_do_pobrania; st.rerun()
+        
         if odbiorcy:
             oczekujace_zk = [z for z in st.session_state.zamowienia if z["Status"] == "Gotowe do wydania"]
             if oczekujace_zk:
@@ -1144,17 +1146,32 @@ elif menu == "Wydanie Towaru (WZ)":
                         st.session_state.powiazane_zk = z["id"]
                         st.session_state.wz_koszyk = [{"Wariant": p["Wariant"], "Ilosc": int(p["Ilość (szt.)"])} for p in z["pozycje"]]
                         st.rerun()
+            
             wybrany_klient = st.selectbox("Nabywca", odbiorcy)
             uwagi_doc = st.text_input("Uwagi", value="Dostawa z magazynu głównego.")
-            dostepne_produkty = st.session_state.produkty[st.session_state.produkty["Stan"] > 0].copy()
-            if not dostepne_produkty.empty:
-                opcje_list = [f"{r['Wariant']} (Dostępne: {int(r['Stan'])} szt.)" for _, r in dostepne_produkty.iterrows()]
-                wybrana_opcja = st.selectbox("Wybierz asortyment z magazynu", opcje_list)
-                ile_w = st.number_input("Ilość do wydania", min_value=1, value=1)
+            
+            dostepne_opcje = []
+            dostepnosci_map = {}
+            for _, row in st.session_state.produkty.iterrows():
+                wariant_nazwa = row["Wariant"]
+                stan_fizyczny = int(row["Stan"])
+                wolne_dostepne = stan_fizyczny - rezerwacje_systemowe.get(wariant_nazwa, 0)
+                if wolne_dostepne > 0:
+                    opcja_string = f"{wariant_nazwa} (Dostępne z wolnej puli: {wolne_dostepne} szt.)"
+                    dostepne_opcje.append(opcja_string)
+                    dostepnosci_map[opcja_string] = wolne_dostepne
+            
+            if dostepne_opcje:
+                wybrana_opcja = st.selectbox("Wybierz asortyment z magazynu (tylko wolne stany)", dostepne_opcje)
+                max_w_opcji = dostepnosci_map[wybrana_opcja]
+                ile_w = st.number_input("Ilość do wydania", min_value=1, max_value=max_w_opcji, value=1)
                 if st.button("Dodaj do dokumentu"):
                     prawdziwa_nazwa = wybrana_opcja.split(" (Dostępne")[0]
                     st.session_state.wz_koszyk.append({"Wariant": prawdziwa_nazwa, "Ilosc": int(ile_w)})
                     st.rerun()
+            else:
+                st.info("Brak wolnego asortymentu do wydania z ręki (cały magazyn jest pusty lub w całości zarezerwowany pod ZK).")
+                
             if st.session_state.wz_koszyk:
                 st.dataframe(pd.DataFrame(st.session_state.wz_koszyk))
                 if st.button("Zatwierdź wydanie i generuj PDF", type="primary", use_container_width=True):
