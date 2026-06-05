@@ -1031,7 +1031,7 @@ elif menu == "Wydanie Towaru (WZ)":
     else:
         st.subheader("1. Realizacja Zamówienia (Wczytanie z produkcji)")
         
-        # ZMIANA LOGIKI: Wczytujemy na WZ tylko te zamówienia, które mają status "Gotowe do wydania"
+        # Wczytujemy na WZ tylko te zamówienia, które mają status "Gotowe do wydania"
         oczekujace_zk = [z for z in st.session_state.zamowienia if z["Status"] == "Gotowe do wydania"]
         
         if oczekujace_zk:
@@ -1118,33 +1118,108 @@ elif menu == "Wydanie Towaru (WZ)":
                                 bledy = True
                                 
                         if not bledy:
+                            # ---------------------------------------------------------
+                            # PRZYWRÓCONY PEŁNY KOD GENEROWANIA WZ PDF
+                            # ---------------------------------------------------------
                             dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
+                            klient_adres = dane_klienta["Adres"]
+                            klient_nip = dane_klienta["NIP"]
+                            
                             font_path, font_bold_path = pobierz_czcionki()
                             pdf = FPDF()
                             pdf.add_page()
                             pdf.add_font("Roboto", "", font_path, uni=True)
                             pdf.add_font("Roboto", "B", font_bold_path, uni=True)
+                            
+                            pdf.set_fill_color(240, 240, 240)
                             pdf.set_font("Roboto", "B", 15)
                             pdf.cell(0, 12, f"WYDANIE ZEWNĘTRZNE (WZ) NR {nr_wz_auto}", border=0, ln=1, align='C', fill=True)
+                            
+                            if st.session_state.powiazane_zk:
+                                pdf.set_font("Roboto", "", 11)
+                                pdf.cell(0, 8, f"Dotyczy zamówienia nr: {st.session_state.powiazane_zk}", border=0, ln=1, align='C')
+                            
+                            pdf.set_font("Roboto", "", 9)
+                            pdf.set_text_color(100, 100, 100)
+                            pdf.cell(0, 6, f"Data wydania: {datetime.now().strftime('%Y-%m-%d')}   |   Miejsce wystawienia: {MOJA_FIRMA['miejscowosc_wystawienia']}", border=0, ln=1, align='R')
+                            pdf.set_text_color(0, 0, 0) 
+                            pdf.ln(8)
+                            
+                            y_start = pdf.get_y()
+                            pdf.set_fill_color(248, 248, 248)
+                            pdf.set_font("Roboto", "B", 10)
+                            pdf.cell(90, 7, "  SPRZEDAWCA / WYSTAWCA", border=0, ln=1, fill=True)
+                            pdf.set_font("Roboto", "", 9)
+                            pdf.multi_cell(90, 5, f"{MOJA_FIRMA['nazwa']}\n{MOJA_FIRMA['adres']}\n{MOJA_FIRMA['nip']}\n{MOJA_FIRMA['kontakt']}", border=0)
+                            y_left = pdf.get_y()
+                            
+                            pdf.set_xy(105, y_start)
+                            pdf.set_font("Roboto", "B", 10)
+                            pdf.cell(90, 7, "  NABYWCA / ODBIORCA", border=0, ln=1, fill=True)
+                            pdf.set_xy(105, y_start + 7)
+                            pdf.set_font("Roboto", "", 9)
+                            nip_czysty = f"NIP: {klient_nip}" if pd.notna(klient_nip) and str(klient_nip).strip() else ""
+                            pdf.multi_cell(90, 5, f"{wybrany_klient}\n{klient_adres}\n{nip_czysty}", border=0)
+                            y_right = pdf.get_y()
+                            
+                            pdf.set_y(max(y_left, y_right) + 12)
+                            pdf.set_font("Roboto", "B", 10)
+                            pdf.cell(0, 8, "POZYCJE DOKUMENTU", border="B", ln=1)
+                            pdf.ln(3)
+                            
+                            pdf.set_fill_color(230, 235, 245)
+                            pdf.set_font("Roboto", "B", 9)
+                            pdf.cell(15, 8, "Lp.", border=1, align='C', fill=True)
+                            pdf.cell(115, 8, "Nazwa asortymentu", border=1, align='L', fill=True)
+                            pdf.cell(30, 8, "Ilość", border=1, align='C', fill=True)
+                            pdf.cell(30, 8, "Jm.", border=1, align='C', ln=1, fill=True)
+                            
+                            pdf.set_font("Roboto", "", 9)
                             
                             lp = 1
                             for pozycja in st.session_state.wz_koszyk:
                                 nazwa_w = pozycja["Wariant"]
                                 ile_w = pozycja["Ilosc"]
+                                
+                                pdf.cell(15, 8, str(lp), border=1, align='C')
+                                pdf.cell(115, 8, nazwa_w, border=1, align='L')
+                                pdf.cell(30, 8, str(ile_w), border=1, align='C')
+                                pdf.cell(30, 8, "szt.", border=1, align='C', ln=1)
+                                
                                 idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
                                 st.session_state.produkty.at[idx, "Stan"] -= ile_w
+                                
                                 dodaj_ruch("WZ", nr_wz_auto, nazwa_w, ile_w, wybrany_klient)
                                 lp += 1
                             
                             st.session_state.wz_counter += 1
                             
-                            # Zamykamy powiązane zamówienie i zmieniamy jego status na Zrealizowane
                             if st.session_state.powiazane_zk:
                                 for zmw in st.session_state.zamowienia:
                                     if zmw["id"] == st.session_state.powiazane_zk:
                                         zmw["Status"] = "Zrealizowane"
                                         break
                                 st.session_state.powiazane_zk = None
+                            
+                            pdf.ln(10)
+                            if uwagi_doc.strip():
+                                pdf.set_font("Roboto", "B", 9)
+                                pdf.cell(15, 5, "Uwagi:", border=0)
+                                pdf.set_font("Roboto", "", 9)
+                                pdf.multi_cell(0, 5, uwagi_doc.strip(), border=0)
+                            
+                            pdf.ln(25)
+                            y_sig = pdf.get_y()
+                            pdf.set_font("Roboto", "", 8.5)
+                            pdf.set_xy(15, y_sig)
+                            pdf.cell(60, 5, "..........................................................", align='C', ln=1)
+                            pdf.set_x(15)
+                            pdf.cell(60, 5, f"Wystawił: {st.session_state.aktualny_uzytkownik}", align='C')
+                            
+                            pdf.set_xy(135, y_sig)
+                            pdf.cell(60, 5, "..........................................................", align='C', ln=1)
+                            pdf.set_x(135)
+                            pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
                             
                             st.session_state.wz_pdf_do_pobrania = {"nazwa": f"{nr_wz_auto.replace('/', '_')}.pdf", "data": pdf.output(dest="S").encode("latin-1")}
                             st.session_state.wz_koszyk = []
