@@ -130,11 +130,23 @@ if 'init_v49' not in st.session_state:
     st.session_state.zlecenia_produkcyjne = [] 
     st.session_state.rejestr_wz = [] 
     
+    # ------------------------------------------
+    # ZMIANA: Niezależne uprawnienia dla KAŻDEJ zakładki
+    # ------------------------------------------
     st.session_state.uzytkownicy = {
         "admin": {
             "haslo": "admin123", 
             "imie": "Kierownik Magazynu",
-            "uprawnienia": {"produkcja": True, "pz": True, "wz": True, "admin": True}
+            "uprawnienia": {
+                "pulpit": True,
+                "magazyn": True,
+                "zk": True,
+                "produkcja": True, 
+                "pz": True, 
+                "wz": True, 
+                "crm": True,
+                "admin": True
+            }
         }
     }
     
@@ -235,7 +247,7 @@ if not st.session_state.zalogowany:
     st.stop()
 
 # ==========================================
-# MENU SIDEBAR
+# MENU SIDEBAR (Z NIEZALEŻNYM DOSTĘPEM)
 # ==========================================
 st.sidebar.title("Nawigacja")
 st.sidebar.info(f"Zalogowano jako:\n**{st.session_state.aktualny_uzytkownik}**")
@@ -246,15 +258,23 @@ if st.sidebar.button("Wyloguj", use_container_width=True):
     st.rerun()
 
 st.sidebar.divider()
-opcje = ["Pulpit Główny", "Stan Magazynu"]
-if st.session_state.aktualne_uprawnienia.get("wz"): opcje.append("Zamówienia (ZK)")
-if st.session_state.aktualne_uprawnienia.get("produkcja"): opcje.append("Moduł Production")
-if st.session_state.aktualne_uprawnienia.get("pz"): opcje.append("Przyjęcie Towaru (PZ)")
-if st.session_state.aktualne_uprawnienia.get("wz"): opcje.append("Wydanie Towaru (WZ)")
-if st.session_state.aktualne_uprawnienia.get("pz") or st.session_state.aktualne_uprawnienia.get("wz"):
-    opcje.append("Baza Kontrahentów (CRM)")
-if st.session_state.aktualne_uprawnienia.get("admin"): 
-    opcje.append("Panel Administracyjny")
+
+opcje = []
+u_perms = st.session_state.aktualne_uprawnienia
+
+# Rozbicie na w 100% niezależne checkboxy
+if u_perms.get("pulpit", True): opcje.append("Pulpit Główny")
+if u_perms.get("magazyn", True): opcje.append("Stan Magazynu")
+if u_perms.get("zk", False): opcje.append("Zamówienia (ZK)")
+if u_perms.get("produkcja", False): opcje.append("Moduł Production")
+if u_perms.get("pz", False): opcje.append("Przyjęcie Towaru (PZ)")
+if u_perms.get("wz", False): opcje.append("Wydanie Towaru (WZ)")
+if u_perms.get("crm", False): opcje.append("Baza Kontrahentów (CRM)")
+if u_perms.get("admin", False): opcje.append("Panel Administracyjny")
+
+if not opcje:
+    st.warning("Twoje konto nie ma przypisanych żadnych modułów. Skontaktuj się z administratorem.")
+    st.stop()
 
 menu = st.sidebar.radio("Wybierz moduł:", opcje)
 
@@ -945,7 +965,7 @@ elif menu == "Moduł Production":
                         total_produced[b["Z_czego"]] = total_produced.get(b["Z_czego"], 0) - b["Brak_szt"]
                     df_plan_wyrobow = pd.DataFrame([{"Wariant asortymentu": k, "Ilość planowana (szt.)": v} for k, v in total_produced.items() if v != 0])
                     st.dataframe(df_plan_wyrobow, hide_index=True, use_container_width=True)
-                    if st.button(f" Pelne Potwierdzenie Wykonania Partii {job['id']}", key=f"conf_job_{job['id']}", type="primary", use_container_width=True):
+                    if st.button(f"🟢 POTWIERDZAM WYPRODUKOWANIE PARTII {job['id']}", key=f"conf_job_{job['id']}", type="primary", use_container_width=True):
                         data_dzis_str = datetime.now().strftime("%Y/%m/%d")
                         if snap["brakuje_jumbo"] > 0:
                             bj = snap["brakuje_jumbo"]
@@ -987,6 +1007,9 @@ elif menu == "Moduł Production":
                         st.success(f"Zlecenie {job['id']} zamknięte pomyślnie. Towar trafił na stan magazynu gotowego.")
                         st.rerun()
 
+# ==========================================
+# MODUŁ KONTRAHENTÓW (CRM)
+# ==========================================
 elif menu == "Baza Kontrahentów (CRM)":
     st.header("Zarządzanie Bazą Kontrahentów (CRM)")
     st.write("Przeglądaj podmioty handlowe, modyfikuj ich dane rejestrowe oraz zarządzaj nowymi wpisami.")
@@ -1000,18 +1023,14 @@ elif menu == "Baza Kontrahentów (CRM)":
         filtr_typ = st.radio("Filtruj rejestr firm:", ["Wszystkie podmioty", "Klienci (Odbiorcy)", "Dostawcy surowców"], horizontal=True)
         
         df_crm = st.session_state.kontrahenci.copy()
-        if filtr_typ == "Klienci (Odbiorcy)":
-            df_crm = df_crm[df_crm["Typ"] == "Odbiorca"]
-        elif filtr_typ == "Dostawcy surowców":
-            df_crm = df_crm[df_crm["Typ"] == "Dostawca"]
+        if filtr_typ == "Klienci (Odbiorcy)": df_crm = df_crm[df_crm["Typ"] == "Odbiorca"]
+        elif filtr_typ == "Dostawcy surowców": df_crm = df_crm[df_crm["Typ"] == "Dostawca"]
             
-        if df_crm.empty:
-            st.info("Brak podmiotów spełniających wybrane kryteria.")
+        if df_crm.empty: st.info("Brak podmiotów spełniających wybrane kryteria.")
         else:
             st.write("---")
             for idx, row in df_crm.iterrows():
                 col_dane, col_akcje = st.columns([4, 1])
-                
                 with col_dane:
                     border_style = "item-card-purple" if row["Typ"] == "Dostawca" else "item-card"
                     st.markdown(f'''
@@ -1020,7 +1039,6 @@ elif menu == "Baza Kontrahentów (CRM)":
                         <div class="card-details"><b>NIP:</b> {row["NIP"]} | <b>Adres siedziby:</b> {row["Adres"]}</div>
                     </div>
                     ''', unsafe_allow_html=True)
-                
                 with col_akcje:
                     st.markdown("<div style='margin-top:5px;'></div>", unsafe_allow_html=True)
                     c_edit, c_del = st.columns(2)
@@ -1037,14 +1055,12 @@ elif menu == "Baza Kontrahentów (CRM)":
                 idx_do_edycji = st.session_state.crm_edycja_id
                 if idx_do_edycji < len(st.session_state.kontrahenci):
                     firma_dane = st.session_state.kontrahenci.iloc[idx_do_edycji]
-                    
                     st.subheader(f"Modyfikacja danych: {firma_dane['Nazwa']}")
                     with st.form("edycja_firmy_form"):
                         e_nazwa = st.text_input("Pełna nazwa podmiotu", value=firma_dane["Nazwa"])
                         e_nip = st.text_input("Identyfikator podatkowy NIP", value=firma_dane["NIP"])
                         e_adres = st.text_input("Adres rejestrowy / dystrybucyjny", value=firma_dane["Adres"])
                         e_typ = st.selectbox("Klasyfikacja operacyjna", ["Odbiorca", "Dostawca"], index=0 if firma_dane["Typ"] == "Odbiorca" else 1)
-                        
                         c_e1, c_e2 = st.columns(2)
                         if c_e1.form_submit_button("Zapisz zmiany w bazie"):
                             if e_nazwa.strip() and e_adres.strip():
@@ -1064,7 +1080,6 @@ elif menu == "Baza Kontrahentów (CRM)":
     with tab_dodaj:
         st.subheader("Karta rejestracyjna nowego kontrahenta")
         st.write("Wypełnij poniższe pola. Pola oznaczone gwiazdką (*) są niezbędne do prawidłowego wystawiania dokumentów WZ/PZ.")
-        
         with st.form("nowy_kontrahent_rozbudowany_form"):
             col_form1, col_form2 = st.columns(2)
             with col_form1:
@@ -1073,7 +1088,6 @@ elif menu == "Baza Kontrahentów (CRM)":
             with col_form2:
                 nowy_typ = st.selectbox("🏷️ Typ profilu w systemie", ["Odbiorca", "Dostawca"])
                 nowy_adres = st.text_input("📍 Dokładny adres siedziby (Ulica, Kod, Miasto) *")
-                
             st.markdown("<br>", unsafe_allow_html=True)
             if st.form_submit_button("Zapisz w CRM", type="primary"):
                 if nowa_nazwa.strip() and nowy_adres.strip():
@@ -1083,6 +1097,9 @@ elif menu == "Baza Kontrahentów (CRM)":
                     st.rerun()
                 else: st.error("Pola 'Nazwa firmy' oraz 'Adres siedziby' są obowiązkowe.")
 
+# ==========================================
+# MODUŁ PRZYJĘCIE TOWARU (PZ)
+# ==========================================
 elif menu == "Przyjęcie Towaru (PZ)":
     st.header("Przyjęcie Zewnętrzne (PZ)")
     tab_nowe_pz, tab_rejestr_pz = st.tabs(["Wprowadź Dokument PZ", "🗂️ Rejestr Dokumentów PZ"])
@@ -1115,6 +1132,9 @@ elif menu == "Przyjęcie Towaru (PZ)":
         else:
             st.info("Brak zarejestrowanych dokumentów PZ w bazie.")
 
+# ==========================================
+# MODUŁ WYDANIE TOWARU (WZ)
+# ==========================================
 elif menu == "Wydanie Towaru (WZ)":
     st.header("Wydanie Zewnętrzne (WZ)")
     
@@ -1279,6 +1299,9 @@ elif menu == "Wydanie Towaru (WZ)":
                         key=f"reprint_{dokument['nr_wz']}"
                     )
 
+# ==========================================
+# MODUŁ PANEL ADMINISTRACYJNY
+# ==========================================
 elif menu == "Panel Administracyjny":
     st.header("Panel Administracyjny Systemu")
     st.write("Zarządzaj dostępem użytkowników do zakładek oraz przeprowadzaj ręczną korektę stanów magazynowych w czasie rzeczywistym.")
@@ -1301,10 +1324,14 @@ elif menu == "Panel Administracyjny":
                 u_haslo = st.text_input("Hasło startowe *", type="password")
             with col_u2:
                 st.write("**Dostęp do modułów systemowych:**")
-                perm_produkcja = st.checkbox("Moduł Production (Zarządzanie Produkcją i MRP)")
+                perm_pulpit = st.checkbox("Pulpit Główny (Wykresy i statystyki)", value=True)
+                perm_magazyn = st.checkbox("Stan Magazynu (Podgląd)", value=True)
+                perm_zk = st.checkbox("Zamówienia (ZK)")
+                perm_produkcja = st.checkbox("Moduł Production (MRP)")
                 perm_pz = st.checkbox("Przyjęcie Towaru (PZ)")
-                perm_wz = st.checkbox("Wydanie Towaru (WZ) oraz Zamówienia (ZK)")
-                perm_admin = st.checkbox("Panel Administracyjny (Pełne Zarządzanie)")
+                perm_wz = st.checkbox("Wydanie Towaru (WZ)")
+                perm_crm = st.checkbox("Baza Kontrahentów (CRM)")
+                perm_admin = st.checkbox("Panel Administracyjny")
             
             st.markdown("<br>", unsafe_allow_html=True)
             if st.form_submit_button("Zapisz profil użytkownika w systemie", type="primary"):
@@ -1314,9 +1341,13 @@ elif menu == "Panel Administracyjny":
                         "haslo": u_haslo.strip(),
                         "imie": u_imie.strip(),
                         "uprawnienia": {
+                            "pulpit": perm_pulpit,
+                            "magazyn": perm_magazyn,
+                            "zk": perm_zk,
                             "produkcja": perm_produkcja,
                             "pz": perm_pz,
                             "wz": perm_wz,
+                            "crm": perm_crm,
                             "admin": perm_admin
                         }
                     }
@@ -1332,10 +1363,14 @@ elif menu == "Panel Administracyjny":
             df_uz_lista.append({
                 "Login": log,
                 "Imię i Nazwisko": dane["imie"],
-                "Produkcja (MRP)": "Tak" if dane["uprawnienia"].get("produkcja") else "Nie",
+                "Pulpit": "Tak" if dane["uprawnienia"].get("pulpit") else "Nie",
+                "Magazyn": "Tak" if dane["uprawnienia"].get("magazyn") else "Nie",
+                "Zamówienia (ZK)": "Tak" if dane["uprawnienia"].get("zk") else "Nie",
+                "Produkcja": "Tak" if dane["uprawnienia"].get("produkcja") else "Nie",
                 "Przyjęcia (PZ)": "Tak" if dane["uprawnienia"].get("pz") else "Nie",
-                "Wydania (WZ/ZK)": "Tak" if dane["uprawnienia"].get("wz") else "Nie",
-                "Administrator": "Tak" if dane["uprawnienia"].get("admin") else "Nie",
+                "Wydania (WZ)": "Tak" if dane["uprawnienia"].get("wz") else "Nie",
+                "CRM": "Tak" if dane["uprawnienia"].get("crm") else "Nie",
+                "Admin": "Tak" if dane["uprawnienia"].get("admin") else "Nie",
             })
         st.dataframe(pd.DataFrame(df_uz_lista), use_container_width=True, hide_index=True)
 
