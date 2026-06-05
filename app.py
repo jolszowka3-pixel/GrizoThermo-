@@ -77,14 +77,11 @@ def zaladuj_lub_inicjalizuj_baze():
         }
     st.session_state.uzytkownicy = uzytkownicy_dict
 
-    # 2. Zakładka: Kontrahenci (ZMIANA: System całkowicie bazuje na chmurze, bez zmyślonych firm)
+    # 2. Zakładka: Kontrahenci
     try:
         df_kon = conn.read(worksheet="Kontrahenci", ttl=0)
         cols_lower = [str(c).strip().lower() for c in df_kon.columns]
-        # Błąd wyrzucamy TYLKO gdy brakuje nagłówka "nazwa". Pusta tabela to poprawna tabela!
         if "nazwa" not in cols_lower: raise Exception() 
-        
-        # Ochrona NIPu przed notacją naukową
         for col in df_kon.columns:
             if str(col).strip().upper() == "NIP":
                 df_kon[col] = df_kon[col].apply(bezpieczny_str)
@@ -398,9 +395,8 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-# ZMIANA: init_v55 dla wymuszenia przeładowania CRM!
-if 'init_v55' not in st.session_state:
-    st.session_state.init_v55 = True
+if 'init_v56' not in st.session_state:
+    st.session_state.init_v56 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -494,77 +490,71 @@ if st.sidebar.button("🔄 Wymuś synchronizację z chmurą"):
     st.rerun()
 
 # ==========================================
-# MODUŁ 1: PULPIT GŁÓWNY (DASHBOARD)
+# MODUŁ 1: PULPIT GŁÓWNY (DASHBOARD) - NOWY CZYSTY WYGLĄD
 # ==========================================
 if menu == "Pulpit Główny":
-    st.markdown("<h2 style='text-align: center; color: #1e40af; margin-bottom: 30px;'>📊 Centrum Dowodzenia GrizoThermo+</h2>", unsafe_allow_html=True)
+    st.header("Pulpit Zarządzania: GrizoThermo+")
     
-    # 1. Obliczenia danych do pulpitu
-    suma_gotowych = int(st.session_state.produkty["Stan"].sum())
+    # --- OBLICZENIA ---
+    # 1. Ilość rolek Jumbo na stanie
     stan_jumbo = int(st.session_state.polprodukty.loc[0, "Stan"])
-    stan_alu = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0])
     
-    aktywne_zk = [z for z in st.session_state.zamowienia if z["Status"] in ["Czeka na realizację", "W produkcji", "Gotowe do wydania"]]
-    ile_czeka = len([z for z in aktywne_zk if z["Status"] == "Czeka na realizację"])
-    ile_w_toku = len([z for z in aktywne_zk if z["Status"] == "W produkcji"])
-    ile_gotowe = len([z for z in aktywne_zk if z["Status"] == "Gotowe do wydania"])
-
-    # 2. Nowoczesne Karty KPI (Górny wiersz)
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    with kpi1:
-        st.markdown(f'<div class="metric-card" style="border-top: 4px solid #3b82f6;"><div class="card-details">📦 WYROBY GOTOWE</div><div style="font-size: 1.8rem; font-weight: 700; color: #1f2937;">{suma_gotowych} <span style="font-size: 1rem; color: #6b7280;">szt.</span></div></div>', unsafe_allow_html=True)
-    with kpi2:
-        st.markdown(f'<div class="metric-card" style="border-top: 4px solid #8b5cf6;"><div class="card-details">🗞️ ROLKI JUMBO (MAGAZYN)</div><div style="font-size: 1.8rem; font-weight: 700; color: #1f2937;">{stan_jumbo} <span style="font-size: 1rem; color: #6b7280;">szt.</span></div></div>', unsafe_allow_html=True)
-    with kpi3:
-        st.markdown(f'<div class="metric-card" style="border-top: 4px solid #10b981;"><div class="card-details">📏 ZAPAS ALUMINIUM</div><div style="font-size: 1.8rem; font-weight: 700; color: #1f2937;">{stan_alu:g} <span style="font-size: 1rem; color: #6b7280;">mb</span></div></div>', unsafe_allow_html=True)
-    with kpi4:
-        st.markdown(f'<div class="metric-card" style="border-top: 4px solid #f59e0b;"><div class="card-details">🛒 AKTYWNE ZAMÓWIENIA</div><div style="font-size: 1.8rem; font-weight: 700; color: #1f2937;">{len(aktywne_zk)} <span style="font-size: 1rem; color: #6b7280;">zk</span></div></div>', unsafe_allow_html=True)
+    # 2. Ile maksymalnie jesteśmy w stanie wyprodukować z obecnych surowców (wąskie gardło)
+    s_alu = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0])
+    s_bia = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K02", "Stan"].values[0])
+    s_zie = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K03", "Stan"].values[0])
     
-    st.markdown("<br>", unsafe_allow_html=True)
+    rec_alu = float(st.session_state.receptura_baza["K01"])
+    rec_bia = float(st.session_state.receptura_baza["K02"])
+    rec_zie = float(st.session_state.receptura_baza["K03"])
+    
+    potencjal_jumbo = int(min(s_alu / rec_alu, s_bia / rec_bia, s_zie / rec_zie))
+    
+    # 3. Aktywne zamówienia
+    aktywne_zk = [z for z in st.session_state.zamowienia if z["Status"] != "Zrealizowane"]
+    ile_aktywnych = len(aktywne_zk)
 
-    # 3. Alerty o krytycznych brakach
-    braki_surowcowe = []
+    # 4. Alerty surowcowe (czy starczy na 10 rolek Jumbo)
+    braki_na_10 = []
     for _, row_k in st.session_state.komponenty.iterrows():
-        prog_alarmowy = float(st.session_state.receptura_baza.get(row_k['ID'], 0)) * 20
+        prog_10_szt = float(st.session_state.receptura_baza.get(row_k['ID'], 0)) * 10
         aktualny_stan = float(row_k['Stan'])
-        if aktualny_stan < prog_alarmowy:
-            niedobor = prog_alarmowy - aktualny_stan
-            braki_surowcowe.append(f"**{row_k['Nazwa']}** (Brakuje: {niedobor:g} {row_k['Jednostka']} do bezpiecznego minimum)")
-            
-    if braki_surowcowe:
-        st.error("⚠️ **ALERT MAGAZYNOWY:** Bieżący stan surowców nie pozwala na realizację partii 20 sztuk rolek Jumbo:\n\n" + "\n".join([f"- {b}" for b in braki_surowcowe]))
+        if aktualny_stan < prog_10_szt:
+            brakuje = prog_10_szt - aktualny_stan
+            braki_na_10.append(f"**{row_k['Nazwa']}** (Brakuje {brakuje:g} {row_k['Jednostka']} do bezpiecznego minimum 10 szt.)")
 
-    # 4. Dolna sekcja: Kondycja magazynu i Statusy
-    col_dash1, col_dash2 = st.columns([1, 1])
+    # --- WYŚWIETLANIE ---
     
-    with col_dash1:
-        st.markdown('<div class="item-card">', unsafe_allow_html=True)
-        st.subheader("📊 Lejek Zamówień (ZK)")
-        st.write("Podgląd statusów aktualnie obsługiwanych zamówień:")
+    # Pasek alertu na samej górze
+    if braki_na_10:
+        st.error("⚠️ **ALERT SUROWCOWY:** Brakuje surowców do wyprodukowania 10 szt. rolek Jumbo!\n\n" + "\n".join([f"- {b}" for b in braki_na_10]))
+    else:
+        st.success("✅ **STATUS SUROWCÓW:** Magazyn zabezpieczony na wyprodukowanie co najmniej 10 rolek Jumbo.")
+
+    st.divider()
+    
+    # Główne kafelki
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f'<div class="metric-card" style="border-left: 5px solid #8b5cf6;"><div class="card-details">Rzeczywisty stan magazynu</div><div style="font-size: 1.8rem; font-weight: 700;">{stan_jumbo} <span style="font-size: 1rem; color: #6b7280;">rolek Jumbo</span></div></div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown(f'<div class="metric-card" style="border-left: 5px solid #10b981;"><div class="card-details">Potencjał produkcyjny (z dostępnych surowców)</div><div style="font-size: 1.8rem; font-weight: 700;">{potencjal_jumbo} <span style="font-size: 1rem; color: #6b7280;">rolek Jumbo</span></div></div>', unsafe_allow_html=True)
+
+    st.write("")
+    
+    # Lista obecnych zamówień
+    st.subheader(f"🛒 Obecne zamówienia do realizacji ({ile_aktywnych})")
+    if not aktywne_zk:
+        st.info("Brak aktywnych zamówień. Wszystko zostało zrealizowane i wydane klientom.")
+    else:
+        # Prezentacja w formie przejrzystej tabeli
+        df_aktywne = pd.DataFrame([{
+            "Nr Zamówienia": z["id"], 
+            "Firma zamawiająca": z["klient"], 
+            "Status na produkcji": z["Status"]
+        } for z in aktywne_zk])
         
-        # Proste, wizualne słupki statusów
-        st.caption("Czekają na plan produkcyjny:")
-        st.progress(min(ile_czeka / max(len(aktywne_zk), 1), 1.0), text=f"{ile_czeka} szt.")
-        
-        st.caption("Obecnie na hali (W produkcji):")
-        st.progress(min(ile_w_toku / max(len(aktywne_zk), 1), 1.0), text=f"{ile_w_toku} szt.")
-        
-        st.caption("Gotowe do wydania na WZ:")
-        st.progress(min(ile_gotowe / max(len(aktywne_zk), 1), 1.0), text=f"{ile_gotowe} szt.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-    with col_dash2:
-        st.markdown('<div class="item-card">', unsafe_allow_html=True)
-        st.subheader("⚡ Ostatnia aktywność na hali")
-        if st.session_state.historia.empty:
-            st.info("Brak zarejestrowanych zdarzeń w bazie.")
-        else:
-            df_hist_show = st.session_state.historia.sort_values(by="Data", ascending=False).head(6)
-            st.dataframe(
-                df_hist_show[["Data", "Typ", "Produkt/Surowiec", "Ilosc"]],
-                use_container_width=True, hide_index=True
-            )
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.dataframe(df_aktywne, use_container_width=True, hide_index=True)
 
 # ==========================================
 # MODUŁ 2: STAN MAGAZYNU
@@ -1047,7 +1037,6 @@ elif menu == "Baza Kontrahentów (CRM)":
         filtr_typ = st.radio("Filtruj:", ["Wszystkie podmioty", "Klienci (Odbiorcy)", "Dostawcy surowców"], horizontal=True)
         df_crm = st.session_state.kontrahenci.copy()
         
-        # Jeśli z chmury pobrano pustą tabelę z nagłówkami, to "empty" złapie, by nie wywalić błędu iteracji
         if not df_crm.empty:
             if filtr_typ == "Klienci (Odbiorcy)": df_crm = df_crm[df_crm["Typ"] == "Odbiorca"]
             elif filtr_typ == "Dostawcy surowców": df_crm = df_crm[df_crm["Typ"] == "Dostawca"]
