@@ -427,7 +427,7 @@ elif menu == "Moduł Production":
         szerokosci_baza = [10, 15, 20, 25, 30, 35, 115]
         for szer in szerokosci_baza:
             war_okl = f"GrizoThermo+ {szer}cm - Oklejona (13mb)"
-            war_nie = f"GrizoThermo+ {szerokosc}cm - Nieoklejona (13mb)"
+            war_nie = f"GrizoThermo+ {szer}cm - Nieoklejona (13mb)" # POPRAWIONA LITERÓWKA
             
             dem_okl = zapotrzebowanie.get(war_okl, 0)
             dem_nie = zapotrzebowanie.get(war_nie, 0)
@@ -556,6 +556,10 @@ elif menu == "Moduł Production":
         else:
             if not mrp_data["braki_okl"] and not mrp_data["braki_nie"]:
                 st.success("Masz wystarczającą ilość produktów na magazynie, aby pokryć zamówienia bez nowej produkcji.")
+                if st.button("Zatwierdź i oznacz zamówienia jako Gotowe do Wydania", type="primary", use_container_width=True):
+                    for z in oczekujace:
+                        z["Status"] = "Gotowe do wydania"
+                    st.rerun()
             else:
                 st.error("Wykryto braki asortymentu w stosunku do zamówień. Wymagane procesy produkcyjne.")
                 col_b1, col_b2 = st.columns(2)
