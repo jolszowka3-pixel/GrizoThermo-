@@ -497,50 +497,74 @@ if st.sidebar.button("🔄 Wymuś synchronizację z chmurą"):
 # MODUŁ 1: PULPIT GŁÓWNY (DASHBOARD)
 # ==========================================
 if menu == "Pulpit Główny":
-    st.header("Pulpit Zarządzania: GrizoThermo+")
-    st.write("Podsumowanie operacyjne i statystyki krytyczne przedsiębiorstwa.")
+    st.markdown("<h2 style='text-align: center; color: #1e40af; margin-bottom: 30px;'>📊 Centrum Dowodzenia GrizoThermo+</h2>", unsafe_allow_html=True)
     
+    # 1. Obliczenia danych do pulpitu
     suma_gotowych = int(st.session_state.produkty["Stan"].sum())
     stan_jumbo = int(st.session_state.polprodukty.loc[0, "Stan"])
     stan_alu = float(st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0])
-    oczekujace_zk = len([z for z in st.session_state.zamowienia if z["Status"] in ["Czeka na realizację", "W produkcji", "Gotowe do wydania"]])
+    
+    aktywne_zk = [z for z in st.session_state.zamowienia if z["Status"] in ["Czeka na realizację", "W produkcji", "Gotowe do wydania"]]
+    ile_czeka = len([z for z in aktywne_zk if z["Status"] == "Czeka na realizację"])
+    ile_w_toku = len([z for z in aktywne_zk if z["Status"] == "W produkcji"])
+    ile_gotowe = len([z for z in aktywne_zk if z["Status"] == "Gotowe do wydania"])
 
-    col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
-    col_kpi1.metric("WYROBY GOTOWE (SUMA)", f"{suma_gotowych} szt.")
-    col_kpi2.metric("ROLKI JUMBO NA STANIE", f"{stan_jumbo} szt.")
-    col_kpi3.metric("ZAPAS ALUMINIUM", f"{stan_alu:g} mb")
-    col_kpi4.metric("AKTYWNE ZAMÓWIENIA ZK", f"{oczekujace_zk} szt.")
+    # 2. Nowoczesne Karty KPI (Górny wiersz)
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    with kpi1:
+        st.markdown(f'<div class="metric-card" style="border-top: 4px solid #3b82f6;"><div class="card-details">📦 WYROBY GOTOWE</div><div style="font-size: 1.8rem; font-weight: 700; color: #1f2937;">{suma_gotowych} <span style="font-size: 1rem; color: #6b7280;">szt.</span></div></div>', unsafe_allow_html=True)
+    with kpi2:
+        st.markdown(f'<div class="metric-card" style="border-top: 4px solid #8b5cf6;"><div class="card-details">🗞️ ROLKI JUMBO (MAGAZYN)</div><div style="font-size: 1.8rem; font-weight: 700; color: #1f2937;">{stan_jumbo} <span style="font-size: 1rem; color: #6b7280;">szt.</span></div></div>', unsafe_allow_html=True)
+    with kpi3:
+        st.markdown(f'<div class="metric-card" style="border-top: 4px solid #10b981;"><div class="card-details">📏 ZAPAS ALUMINIUM</div><div style="font-size: 1.8rem; font-weight: 700; color: #1f2937;">{stan_alu:g} <span style="font-size: 1rem; color: #6b7280;">mb</span></div></div>', unsafe_allow_html=True)
+    with kpi4:
+        st.markdown(f'<div class="metric-card" style="border-top: 4px solid #f59e0b;"><div class="card-details">🛒 AKTYWNE ZAMÓWIENIA</div><div style="font-size: 1.8rem; font-weight: 700; color: #1f2937;">{len(aktywne_zk)} <span style="font-size: 1rem; color: #6b7280;">zk</span></div></div>', unsafe_allow_html=True)
     
-    st.divider()
-    
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 3. Alerty o krytycznych brakach
     braki_surowcowe = []
     for _, row_k in st.session_state.komponenty.iterrows():
         prog_alarmowy = float(st.session_state.receptura_baza.get(row_k['ID'], 0)) * 20
         aktualny_stan = float(row_k['Stan'])
         if aktualny_stan < prog_alarmowy:
             niedobor = prog_alarmowy - aktualny_stan
-            braki_surowcowe.append(f"{row_k['Nazwa']} (Aktualnie: {aktualny_stan:g} {row_k['Jednostka']}, Deficyt: {niedobor:g} {row_k['Jednostka']})")
+            braki_surowcowe.append(f"**{row_k['Nazwa']}** (Brakuje: {niedobor:g} {row_k['Jednostka']} do bezpiecznego minimum)")
             
     if braki_surowcowe:
-        st.error("ALERT: Krytyczny poziom surowców produkcyjnych\n\nBieżący stan magazynowy uniemożliwia realizację partii 20 sztuk rolek Jumbo:\n\n" + "\n".join([f"* {b}" for b in braki_surowcowe]))
+        st.error("⚠️ **ALERT MAGAZYNOWY:** Bieżący stan surowców nie pozwala na realizację partii 20 sztuk rolek Jumbo:\n\n" + "\n".join([f"- {b}" for b in braki_surowcowe]))
 
-    st.write("")
-    col_dash1, col_dash2 = st.columns([2, 3])
+    # 4. Dolna sekcja: Kondycja magazynu i Statusy
+    col_dash1, col_dash2 = st.columns([1, 1])
     
     with col_dash1:
-        st.subheader("Porównanie Stanu Surowców")
-        df_chart = st.session_state.komponenty[["Nazwa", "Stan"]].set_index("Nazwa")
-        st.bar_chart(df_chart, y="Stan", color="#1e40af")
+        st.markdown('<div class="item-card">', unsafe_allow_html=True)
+        st.subheader("📊 Lejek Zamówień (ZK)")
+        st.write("Podgląd statusów aktualnie obsługiwanych zamówień:")
+        
+        # Proste, wizualne słupki statusów
+        st.caption("Czekają na plan produkcyjny:")
+        st.progress(min(ile_czeka / max(len(aktywne_zk), 1), 1.0), text=f"{ile_czeka} szt.")
+        
+        st.caption("Obecnie na hali (W produkcji):")
+        st.progress(min(ile_w_toku / max(len(aktywne_zk), 1), 1.0), text=f"{ile_w_toku} szt.")
+        
+        st.caption("Gotowe do wydania na WZ:")
+        st.progress(min(ile_gotowe / max(len(aktywne_zk), 1), 1.0), text=f"{ile_gotowe} szt.")
+        st.markdown('</div>', unsafe_allow_html=True)
         
     with col_dash2:
-        st.subheader("Ostatnie Operacje Systemowe")
+        st.markdown('<div class="item-card">', unsafe_allow_html=True)
+        st.subheader("⚡ Ostatnia aktywność na hali")
         if st.session_state.historia.empty:
             st.info("Brak zarejestrowanych zdarzeń w bazie.")
         else:
+            df_hist_show = st.session_state.historia.sort_values(by="Data", ascending=False).head(6)
             st.dataframe(
-                st.session_state.historia.sort_values(by="Data", ascending=False).head(5),
+                df_hist_show[["Data", "Typ", "Produkt/Surowiec", "Ilosc"]],
                 use_container_width=True, hide_index=True
             )
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
 # MODUŁ 2: STAN MAGAZYNU
