@@ -20,10 +20,13 @@ def zaladuj_lub_inicjalizuj_baze():
     """Pobiera dane z chmury. Jeśli arkusz jest całkiem pusty, sam tworzy zakładki i nagłówki."""
     import json
     
+    # WYMUSZENIE POPRAWNYCH NAGŁÓWKÓW DLA HISTORII (Zabezpieczenie przed KeyError)
+    kolumny_historii = ["Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"]
+
     # 1. Zakładka: Uzytkownicy
     try:
         df_uz = conn.read(worksheet="Uzytkownicy", ttl=0)
-        if df_uz.empty: raise Exception()
+        if df_uz.empty or "Login" not in df_uz.columns: raise Exception()
     except:
         df_uz = pd.DataFrame([{
             "Login": "admin", "Haslo": "admin123", "Imie": "Kierownik Magazynu",
@@ -47,7 +50,7 @@ def zaladuj_lub_inicjalizuj_baze():
     # 2. Zakładka: Kontrahenci
     try:
         df_kon = conn.read(worksheet="Kontrahenci", ttl=0)
-        if df_kon.empty: raise Exception()
+        if df_kon.empty or "Nazwa" not in df_kon.columns: raise Exception()
     except:
         df_kon = pd.DataFrame([
             {"Nazwa": "Hurtownia Surowców ALUSTAR", "NIP": "1112223344", "Adres": "ul. Hutnicza 10, 40-001 Katowice", "Typ": "Dostawca"},
@@ -60,7 +63,7 @@ def zaladuj_lub_inicjalizuj_baze():
     # 3. Zakładka: Komponenty (Surowce)
     try:
         df_komp = conn.read(worksheet="Komponenty", ttl=0)
-        if df_komp.empty: raise Exception()
+        if df_komp.empty or "ID" not in df_komp.columns: raise Exception()
     except:
         df_komp = pd.DataFrame([
             {"ID": "K01", "Nazwa": "Aluminium zbrojone 1,15m", "Stan": 3200.0, "Jednostka": "mb"},
@@ -73,7 +76,7 @@ def zaladuj_lub_inicjalizuj_baze():
     # 4. Zakładka: Polprodukty
     try:
         df_pol = conn.read(worksheet="Polprodukty", ttl=0)
-        if df_pol.empty: raise Exception()
+        if df_pol.empty or "ID" not in df_pol.columns: raise Exception()
     except:
         df_pol = pd.DataFrame([{"ID": "P01", "Nazwa": "Rolka Jumbo (115cm x 13mb)", "Stan": 0, "Jednostka": "szt."}])
         conn.update(worksheet="Polprodukty", data=df_pol)
@@ -82,7 +85,7 @@ def zaladuj_lub_inicjalizuj_baze():
     # 5. Zakładka: Produkty (Wyroby gotowe)
     try:
         df_prod = conn.read(worksheet="Produkty", ttl=0)
-        if df_prod.empty: raise Exception()
+        if df_prod.empty or "Wariant" not in df_prod.columns: raise Exception()
     except:
         szerokosci = [10, 15, 20, 25, 30, 35, 115]
         warianty_wykonczenia = ["Oklejona", "Nieoklejona"]
@@ -97,8 +100,9 @@ def zaladuj_lub_inicjalizuj_baze():
     # 6. Zakładka: Historia
     try:
         df_hist = conn.read(worksheet="Historia", ttl=0)
+        if df_hist.empty or "Typ" not in df_hist.columns: raise Exception()
     except:
-        df_hist = pd.DataFrame(columns=["Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"])
+        df_hist = pd.DataFrame(columns=kolumny_historii)
         conn.update(worksheet="Historia", data=df_hist)
     st.session_state.historia = df_hist
 
@@ -155,13 +159,20 @@ def zaladuj_lub_inicjalizuj_baze():
         df_dummy = pd.DataFrame(columns=["NrWz", "Data", "KlientNazwa", "KlientAdres", "KlientNip", "Pozycje", "Uwagi"])
         conn.update(worksheet="RejestrWZ", data=df_dummy)
 
-    # Automatyczne przeliczenie liczników operacyjnych z chmury
+    # Bezpieczne przeliczenie liczników operacyjnych z chmury
     st.session_state.zk_counter = len(st.session_state.zamowienia) + 1
     st.session_state.wz_counter = len(st.session_state.rejestr_wz) + 1
     st.session_state.pr_counter = len(st.session_state.zlecenia_produkcyjne) + 1
-    st.session_state.jumbo_counter = len(st.session_state.historia[st.session_state.historia["Typ"] == "PW (Półprod.)"]) + 1
-    st.session_state.konf_counter = len(st.session_state.historia[st.session_state.historia["Typ"] == "PW (Gotowe)"]) + 1
-    st.session_state.okl_counter = len(st.session_state.historia[st.session_state.historia["Typ"] == "PW (Gotowe)"]) + 1
+    
+    # Bezpieczne sprawdzenie kolumn w historii
+    if not st.session_state.historia.empty and "Typ" in st.session_state.historia.columns:
+        st.session_state.jumbo_counter = len(st.session_state.historia[st.session_state.historia["Typ"] == "PW (Półprod.)"]) + 1
+        st.session_state.konf_counter = len(st.session_state.historia[st.session_state.historia["Typ"] == "PW (Gotowe)"]) + 1
+        st.session_state.okl_counter = len(st.session_state.historia[st.session_state.historia["Typ"] == "PW (Gotowe)"]) + 1
+    else:
+        st.session_state.jumbo_counter = 1
+        st.session_state.konf_counter = 1
+        st.session_state.okl_counter = 1
 
 
 def zapisz_tabele_w_chmurze(nazwa_tabeli):
@@ -192,7 +203,7 @@ def zapisz_tabele_w_chmurze(nazwa_tabeli):
                     "admin": dane["uprawnienia"].get("admin", False)
                 })
             conn.update(worksheet="Uzytkownicy", data=pd.DataFrame(rows))
-        elif tabela == "Zamowienia" or nazwa_tabeli == "Zamowienia":
+        elif nazwa_tabeli == "Zamowienia":
             rows = []
             for z in st.session_state.zamowienia:
                 rows.append({
@@ -342,7 +353,6 @@ if 'init_v49' not in st.session_state:
     st.session_state.wybrany_klient_wz = None
     st.session_state.receptura_baza = {"K01": 32.00, "K02": 0.200, "K03": 0.100}
     
-    # WYWOŁANIE POBIERANIA I SAMOINICJALIZACJI W CHMURZE
     zaladuj_lub_inicjalizuj_baze()
 
 def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
@@ -421,7 +431,6 @@ if not opcje:
 
 menu = st.sidebar.radio("Wybierz moduł:", opcje)
 
-# Wygodny przycisk przeładunku chmury dla operatora
 if st.sidebar.button("🔄 Wymuś synchronizację z chmurą"):
     zaladuj_lub_inicjalizuj_baze()
     st.rerun()
@@ -770,7 +779,7 @@ elif menu == "Moduł Production":
                             "zamowienia_powiazane": [z["id"] for z in oczekujace], "status": "W toku"
                         })
                         st.session_state.pr_counter += 1
-                        for z in oczekujace: z["Status"] = "W produkcji"
+                        for z in oczekujace: z["Status"] = "W knittingu" if "W knittingu" in st.session_state else "W produkcji"
                             
                         zapisz_tabele_w_chmurze("ZleceniaProdukcyjne")
                         zapisz_tabele_w_chmurze("Zamowienia")
@@ -791,6 +800,13 @@ elif menu == "Moduł Production":
 
     with tab1:
         st.subheader("Wytłaczanie Rolek Jumbo - RĘCZNIE")
+        s_alu_manual = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K01", "Stan"].values[0]
+        s_bia_manual = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K02", "Stan"].values[0]
+        s_zie_manual = st.session_state.komponenty.loc[st.session_state.komponenty["ID"] == "K03", "Stan"].values[0]
+        m_alu_m = int(s_alu_manual / st.session_state.receptura_baza["K01"])
+        m_bia_m = int(s_bia_manual / st.session_state.receptura_baza["K02"])
+        m_zie_m = int(s_zie_manual / st.session_state.receptura_baza["K03"])
+        m_jumbo = min(m_alu_m, m_bia_m, m_zie_m)
         if m_jumbo > 0:
             with st.form("prod_jumbo"):
                 ile_jumbo = st.number_input("Ile Rolek Jumbo wyprodukowano?", min_value=1, max_value=m_jumbo, value=1)
@@ -847,7 +863,7 @@ elif menu == "Moduł Production":
                     dodaj_ruch("RW", nr_okl_auto, f"GrizoThermo+ {szerokosc_wybrana}cm - Nieoklejona (13mb)", ile_okleic, "Hala")
                     st.session_state.okl_counter += 1
                     zapisz_tabele_w_chmurze("Produkty")
-                    st.success("Zakończono.")
+                    st.success("Zacząłeś oklejanie.")
                     st.rerun()
 
     with tab4:
@@ -925,7 +941,7 @@ elif menu == "Baza Kontrahentów (CRM)":
                     if c_edit.button("✏️", key=f"edit_btn_{idx}"): st.session_state.crm_edycja_id = idx; st.rerun()
                     if c_del.button("🗑️", key=f"del_btn_{idx}"):
                         st.session_state.kontrahenci = st.session_state.kontrahenci.drop(idx).reset_index(drop=True)
-                        zapisz_tabele_w_chmurze("Kontrahentci")
+                        zapisz_tabele_w_chmurze("Kontrahenci")
                         st.rerun()
         if st.session_state.crm_edycja_id is not None:
             idx_do_edycji = st.session_state.crm_edycja_id
@@ -1018,6 +1034,9 @@ elif menu == "Wydanie Towaru (WZ)":
             if st.session_state.wz_koszyk:
                 st.dataframe(pd.DataFrame(st.session_state.wz_koszyk))
                 if st.button("Zatwierdź wydanie i generuj PDF", type="primary", use_container_width=True):
+                    data_dzis_str = datetime.now().strftime("%Y/%m/%d")
+                    nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
+                    
                     dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
                     klient_adres = dane_klienta["Adres"]
                     klient_nip = dane_klienta["NIP"]
