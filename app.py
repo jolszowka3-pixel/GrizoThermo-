@@ -14,11 +14,24 @@ st.set_page_config(page_title="System MRP | GrizoThermo+", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # ==========================================
-# FUNKCJE CHMUROWE (ODCZYT / BEZPIECZNA INICJALIZACJA BAZY GOOGLE)
+# FILTRY ZABEZPIECZAJĄCE FORMAT DANYCH Z CHMURY
+# ==========================================
+def bezpieczny_str(wartosc):
+    if pd.isna(wartosc): return ""
+    val = str(wartosc).strip()
+    if val.endswith(".0"): return val[:-2] # Ucinanie ułamków z haseł i NIP-ów
+    return val
+
+def bezpieczny_bool(wartosc, domyslna=False):
+    if pd.isna(wartosc): return domyslna
+    if isinstance(wartosc, bool): return wartosc
+    return str(wartosc).strip().upper() == "TRUE"
+
+# ==========================================
+# FUNKCJE CHMUROWE (ODCZYT / BAZA GOOGLE)
 # ==========================================
 def zaladuj_lub_inicjalizuj_baze():
-    """Pobiera dane z chmury. W przypadku pustych arkuszy ładuje bazę do pamięci."""
-    
+    """Pobiera dane z chmury i zabezpiecza formaty komórek."""
     kolumny_historii = ["Data", "Typ", "Dokument", "Produkt/Surowiec", "Ilosc", "Użytkownik", "Kontrahent"]
 
     # 1. Zakładka: Uzytkownicy
@@ -33,13 +46,21 @@ def zaladuj_lub_inicjalizuj_baze():
     
     uzytkownicy_dict = {}
     for _, row in df_uz.iterrows():
-        uzytkownicy_dict[str(row['Login']).strip()] = {
-            "haslo": str(row['Haslo']), "imie": str(row['Imie']),
+        log_key = bezpieczny_str(row['Login'])
+        if not log_key: continue
+        
+        uzytkownicy_dict[log_key] = {
+            "haslo": bezpieczny_str(row['Haslo']), 
+            "imie": bezpieczny_str(row['Imie']),
             "uprawnienia": {
-                "pulpit": bool(row.get('pulpit', True)), "magazyn": bool(row.get('magazyn', True)),
-                "zk": bool(row.get('zk', False)), "produkcja": bool(row.get('produkcja', False)),
-                "pz": bool(row.get('pz', False)), "wz": bool(row.get('wz', False)),
-                "crm": bool(row.get('crm', False)), "admin": bool(row.get('admin', False))
+                "pulpit": bezpieczny_bool(row.get('pulpit', True), True),
+                "magazyn": bezpieczny_bool(row.get('magazyn', True), True),
+                "zk": bezpieczny_bool(row.get('zk', False)),
+                "produkcja": bezpieczny_bool(row.get('produkcja', False)),
+                "pz": bezpieczny_bool(row.get('pz', False)),
+                "wz": bezpieczny_bool(row.get('wz', False)),
+                "crm": bezpieczny_bool(row.get('crm', False)),
+                "admin": bezpieczny_bool(row.get('admin', False))
             }
         }
     st.session_state.uzytkownicy = uzytkownicy_dict
@@ -48,6 +69,7 @@ def zaladuj_lub_inicjalizuj_baze():
     try:
         df_kon = conn.read(worksheet="Kontrahenci", ttl=0)
         if df_kon.empty or "Nazwa" not in df_kon.columns: raise Exception()
+        if "NIP" in df_kon.columns: df_kon["NIP"] = df_kon["NIP"].apply(bezpieczny_str)
         st.session_state.kontrahenci = df_kon
     except:
         st.session_state.kontrahenci = pd.DataFrame([
@@ -142,7 +164,7 @@ def zaladuj_lub_inicjalizuj_baze():
             except: poz = []
             rwz_list.append({
                 "nr_wz": str(row_w['NrWz']), "data": str(row_w['Data']), "klient_nazwa": str(row_w['KlientNazwa']),
-                "klient_adres": str(row_w['KlientAdres']), "klient_nip": str(row_w['KlientNip']), "pozycje": poz, "uwagi": str(row_w['Uwagi']) if pd.notna(row_w['Uwagi']) else ""
+                "klient_adres": str(row_w['KlientAdres']), "klient_nip": bezpieczny_str(row_w['KlientNip']), "pozycje": poz, "uwagi": str(row_w['Uwagi']) if pd.notna(row_w['Uwagi']) else ""
             })
         st.session_state.rejestr_wz = rwz_list
     except:
@@ -218,7 +240,7 @@ def zapisz_tabele_w_chmurze(nazwa_tabeli):
             df_to_save = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["NrWz", "Data", "KlientNazwa", "KlientAdres", "KlientNip", "Pozycje", "Uwagi"])
             conn.update(worksheet="RejestrWZ", data=df_to_save)
     except Exception as e:
-        st.error(f"Błąd zapisu w chmurze (Tabela {nazwa_tabeli}): {e}")
+        st.error(f"Błąd zapisu w chmurze (Tabela: {nazwa_tabeli}): {e}")
 
 # ==========================================
 # DANE TWOJEJ FIRMY
@@ -330,9 +352,9 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-# ZMIANA: init_v52 w celu wymuszenia przeładowania pamięci Streamlit!
-if 'init_v52' not in st.session_state:
-    st.session_state.init_v52 = True
+# ZMIANA: Nowy klucz wymusi całkowite wyczyszczenie błędnej pamięci przeglądarki!
+if 'init_v53' not in st.session_state:
+    st.session_state.init_v53 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -705,7 +727,6 @@ elif menu == "Moduł Production":
         s_jumbo_akt = int(st.session_state.polprodukty.at[0, "Stan"])
         brakuje_jumbo = max(0, potrzeba_jumbo_calkowita - s_jumbo_akt)
         
-        # Zabezpieczenie przed błędami serializacji w chmurze
         req_alu = float(brakuje_jumbo * st.session_state.receptura_baza["K01"])
         req_bia = float(brakuje_jumbo * st.session_state.receptura_baza["K02"])
         req_zie = float(brakuje_jumbo * st.session_state.receptura_baza["K03"])
