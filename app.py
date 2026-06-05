@@ -411,28 +411,11 @@ elif menu == "Moduł Production":
     mrp_data = None
     
     if oczekujace:
-        st.subheader("Wybór zlecenia do realizacji")
-        
-        # Tworzymy czytelne etykiety dla listy rozwijanej
-        opcje_zamowien = [f"{z['id']} | Klient: {z['klient']} | Data: {z['data']}" for z in oczekujace]
-        wybrane_zk_str = st.selectbox("Wybierz konkretne zamówienie, które trafia na produkcję:", opcje_zamowien)
-        
-        # Pobieramy obiekt dokładnie tego jednego wybranego zamówienia
-        wybrane_idx = opcje_zamowien.index(wybrane_zk_str)
-        z_wybrane = oczekujace[wybrane_idx]
-        
-        st.divider()
-        st.info(f"🏭 **Aktywne zlecenie produkcyjne:** {z_wybrane['id']} dla {z_wybrane['klient']}")
-        if z_wybrane['uwagi']:
-            st.caption(f"**Uwagi do tego zamówienia:** {z_wybrane['uwagi']}")
-            
-        # Budujemy zapotrzebowanie TYLKO dla tego jednego wybranego zamówienia
         zapotrzebowanie = {}
-        for p in z_wybrane["pozycje"]:
-            wariant = p["Wariant"]
-            zapotrzebowanie[wariant] = zapotrzebowanie.get(wariant, 0) + p["Ilość (szt.)"]
-            
-        # Odtąd reszta Twojego algorytmu działa bez zmian, korzystając z przefiltrowanego 'zapotrzebowania'
+        for z in oczekujace:
+            for p in z["pozycje"]:
+                wariant = p["Wariant"]
+                zapotrzebowanie[wariant] = zapotrzebowanie.get(wariant, 0) + p["Ilość (szt.)"]
                 
         braki_do_oklejenia = []
         braki_do_rozkroju = []
