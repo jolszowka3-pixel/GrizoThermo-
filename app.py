@@ -80,7 +80,7 @@ if 'init_v49' not in st.session_state:
     
     szerokosci = [10, 15, 20, 25, 30, 35, 115]
     warianty_wykonczenia = ["Oklejona", "Nieoklejona"]
-     produkty_list = []
+    produkty_list = []
     
     for szer in szerokosci:
         for war in warianty_wykonczenia:
