@@ -44,7 +44,7 @@ def zaladuj_lub_inicjalizuj_baze():
 
     # 1. Zakładka: Uzytkownicy
     try:
-        df_uz = conn.read(worksheet="Uzytkownicy", ttl=0)
+        df_uz = conn.read(worksheet="Uzytkownicy", ttl=0).dropna(how="all")
         cols_lower = [str(c).strip().lower() for c in df_uz.columns]
         if df_uz.empty or "login" not in cols_lower: raise Exception()
     except:
@@ -76,7 +76,7 @@ def zaladuj_lub_inicjalizuj_baze():
 
     # 2. Zakładka: Kontrahenci
     try:
-        df_kon = conn.read(worksheet="Kontrahenci", ttl=0)
+        df_kon = conn.read(worksheet="Kontrahenci", ttl=0).dropna(how="all")
         cols_lower = [str(c).strip().lower() for c in df_kon.columns]
         if "nazwa" not in cols_lower: raise Exception() 
         for col in df_kon.columns:
@@ -88,7 +88,7 @@ def zaladuj_lub_inicjalizuj_baze():
 
     # 3. Zakładka: Komponenty (Surowce)
     try:
-        df_komp = conn.read(worksheet="Komponenty", ttl=0)
+        df_komp = conn.read(worksheet="Komponenty", ttl=0).dropna(how="all")
         cols_lower = [str(c).strip().lower() for c in df_komp.columns]
         if df_komp.empty or "id" not in cols_lower: raise Exception()
         st.session_state.komponenty = df_komp
@@ -101,7 +101,7 @@ def zaladuj_lub_inicjalizuj_baze():
 
     # 4. Zakładka: Polprodukty
     try:
-        df_pol = conn.read(worksheet="Polprodukty", ttl=0)
+        df_pol = conn.read(worksheet="Polprodukty", ttl=0).dropna(how="all")
         cols_lower = [str(c).strip().lower() for c in df_pol.columns]
         if df_pol.empty or "id" not in cols_lower: raise Exception()
         st.session_state.polprodukty = df_pol
@@ -110,7 +110,7 @@ def zaladuj_lub_inicjalizuj_baze():
 
     # 5. Zakładka: Produkty (Wyroby gotowe)
     try:
-        df_prod = conn.read(worksheet="Produkty", ttl=0)
+        df_prod = conn.read(worksheet="Produkty", ttl=0).dropna(how="all")
         cols_lower = [str(c).strip().lower() for c in df_prod.columns]
         if df_prod.empty or "wariant" not in cols_lower: raise Exception()
         st.session_state.produkty = df_prod
@@ -125,7 +125,7 @@ def zaladuj_lub_inicjalizuj_baze():
 
     # 6. Zakładka: Historia
     try:
-        df_hist = conn.read(worksheet="Historia", ttl=0)
+        df_hist = conn.read(worksheet="Historia", ttl=0).dropna(how="all")
         cols_lower = [str(c).strip().lower() for c in df_hist.columns]
         if df_hist.empty or "typ" not in cols_lower: raise Exception()
         st.session_state.historia = df_hist
@@ -134,7 +134,7 @@ def zaladuj_lub_inicjalizuj_baze():
 
     # 7. Zakładka: Zamowienia
     try:
-        df_zam = conn.read(worksheet="Zamowienia", ttl=0)
+        df_zam = conn.read(worksheet="Zamowienia", ttl=0).dropna(how="all")
         cols_lower = [str(c).strip().lower() for c in df_zam.columns]
         if df_zam.empty or "id" not in cols_lower: raise Exception()
         zam_list = []
@@ -156,7 +156,7 @@ def zaladuj_lub_inicjalizuj_baze():
 
     # 8. Zakładka: ZleceniaProdukcyjne
     try:
-        df_zl = conn.read(worksheet="ZleceniaProdukcyjne", ttl=0)
+        df_zl = conn.read(worksheet="ZleceniaProdukcyjne", ttl=0).dropna(how="all")
         cols_lower = [str(c).strip().lower() for c in df_zl.columns]
         if df_zl.empty or "id" not in cols_lower: raise Exception()
         zl_list = []
@@ -178,7 +178,7 @@ def zaladuj_lub_inicjalizuj_baze():
 
     # 9. Zakładka: RejestrWZ
     try:
-        df_rwz = conn.read(worksheet="RejestrWZ", ttl=0)
+        df_rwz = conn.read(worksheet="RejestrWZ", ttl=0).dropna(how="all")
         cols_lower = [str(c).strip().lower() for c in df_rwz.columns]
         if df_rwz.empty or "nrwz" not in cols_lower: raise Exception()
         rwz_list = []
@@ -432,8 +432,8 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-if 'init_v59' not in st.session_state:
-    st.session_state.init_v59 = True
+if 'init_v60' not in st.session_state:
+    st.session_state.init_v60 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -458,7 +458,6 @@ for z in st.session_state.zamowienia:
                 rezerwacje_systemowe[wariant] = rezerwacje_systemowe.get(wariant, 0) + qty
 
 def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
-    # UWAGA: Ta funkcja tylko zbiera ruchy w pamięci! Zapisujemy zbiorczo na końcu bloku.
     uzytkownik = st.session_state.aktualny_uzytkownik if st.session_state.aktualny_uzytkownik else "System"
     nowy_ruch = pd.DataFrame([{
         "Data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -640,7 +639,7 @@ elif menu == "Stan Magazynu":
             st.markdown(f'<div class="item-card {alert}"><div class="card-title">{row["Nazwa"]}</div><div class="card-details">Stan bieżący: {aktualny_stan:g} {row["Jednostka"]} | Status operacyjny: {status_txt} (Minimum na 20 szt. Jumbo: {prog_alarmowy:g} {row["Jednostka"]})</div></div>', unsafe_allow_html=True)
 
 # ==========================================
-# MODUŁ ZAMÓWIENIA (ZK) - Blokada koszyka na dostępne
+# MODUŁ ZAMÓWIENIA (ZK)
 # ==========================================
 elif menu == "Zamówienia (ZK)":
     st.header("Zamówienia Klientów (ZK)")
@@ -1252,53 +1251,59 @@ elif menu == "Wydanie Towaru (WZ)":
                 
             if st.session_state.wz_koszyk:
                 st.dataframe(pd.DataFrame(st.session_state.wz_koszyk))
-                if st.button("Zatwierdź wydanie i generuj PDF", type="primary", use_container_width=True):
-                    # Ostateczna weryfikacja magazynu (Twarda Blokada)
-                    braki_wz = []
-                    for pozycja in st.session_state.wz_koszyk:
-                        nazwa_w = pozycja["Wariant"]
-                        ile_w = pozycja["Ilosc"]
-                        idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
-                        if int(st.session_state.produkty.at[idx, "Stan"]) < ile_w:
-                            braki_wz.append(nazwa_w)
-                            
-                    if braki_wz:
-                        st.error(f"Operacja odrzucona! Brak fizycznego towaru na regale dla: {', '.join(braki_wz)}. Prawdopodobnie towar został wydany w międzyczasie.")
-                    else:
-                        data_dzis_str = datetime.now().strftime("%Y/%m/%d")
-                        nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
-                        
-                        dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
-                        klient_adres = dane_klienta["Adres"]
-                        klient_nip = dane_klienta["NIP"]
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("Wyczyść koszyk", use_container_width=True):
+                        st.session_state.wz_koszyk = []
+                        st.rerun()
+                with col_btn2:
+                    if st.button("Zatwierdź wydanie i generuj PDF", type="primary", use_container_width=True):
+                        # Ostateczna weryfikacja magazynu (Twarda Blokada)
+                        braki_wz = []
                         for pozycja in st.session_state.wz_koszyk:
                             nazwa_w = pozycja["Wariant"]
                             ile_w = pozycja["Ilosc"]
                             idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
-                            st.session_state.produkty.at[idx, "Stan"] -= int(ile_w)
-                            dodaj_ruch("WZ", nr_wz_auto, nazwa_w, int(ile_w), wybrany_klient)
-                        
-                        st.session_state.rejestr_wz.append({
-                            "nr_wz": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "klient_nazwa": wybrany_klient,
-                            "klient_adres": klient_adres, "klient_nip": klient_nip, "pozycje": st.session_state.wz_koszyk.copy(), "uwagi": uwagi_doc
-                        })
-                        st.session_state.wz_counter += 1
-                        
-                        if st.session_state.powiazane_zk:
-                            for zmw in st.session_state.zamowienia:
-                                if zmw["id"] == st.session_state.powiazane_zk: zmw["Status"] = "Zrealizowane"; break
-                            st.session_state.powiazane_zk = None
-                            st.session_state.wybrany_klient_wz = None
-                        
-                        zapisz_tabele_w_chmurze("Produkty")
-                        zapisz_tabele_w_chmurze("RejestrWZ")
-                        zapisz_tabele_w_chmurze("Zamowienia")
-                        zapisz_tabele_w_chmurze("Historia")
-                        
-                        pdf_data = generuj_wz_pdf(nr_wz_auto, datetime.now().strftime("%Y-%m-%d"), wybrany_klient, klient_adres, klient_nip, st.session_state.rejestr_wz[-1]["pozycje"], uwagi_doc)
-                        st.session_state.wz_pdf_do_pobrania = {"nazwa": f"{nr_wz_auto.replace('/', '_')}.pdf", "data": pdf_data}
-                        st.session_state.wz_koszyk = []
-                        st.rerun()
+                            if int(st.session_state.produkty.at[idx, "Stan"]) < ile_w:
+                                braki_wz.append(nazwa_w)
+                                
+                        if braki_wz:
+                            st.error(f"Operacja odrzucona! Brak fizycznego towaru na regale dla: {', '.join(braki_wz)}. Prawdopodobnie towar został wydany w międzyczasie.")
+                        else:
+                            data_dzis_str = datetime.now().strftime("%Y/%m/%d")
+                            nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
+                            
+                            dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
+                            klient_adres = dane_klienta["Adres"]
+                            klient_nip = dane_klienta["NIP"]
+                            for pozycja in st.session_state.wz_koszyk:
+                                nazwa_w = pozycja["Wariant"]
+                                ile_w = pozycja["Ilosc"]
+                                idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
+                                st.session_state.produkty.at[idx, "Stan"] -= int(ile_w)
+                                dodaj_ruch("WZ", nr_wz_auto, nazwa_w, int(ile_w), wybrany_klient)
+                            
+                            st.session_state.rejestr_wz.append({
+                                "nr_wz": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "klient_nazwa": wybrany_klient,
+                                "klient_adres": klient_adres, "klient_nip": klient_nip, "pozycje": st.session_state.wz_koszyk.copy(), "uwagi": uwagi_doc
+                            })
+                            st.session_state.wz_counter += 1
+                            
+                            if st.session_state.powiazane_zk:
+                                for zmw in st.session_state.zamowienia:
+                                    if zmw["id"] == st.session_state.powiazane_zk: zmw["Status"] = "Zrealizowane"; break
+                                st.session_state.powiazane_zk = None
+                                st.session_state.wybrany_klient_wz = None
+                            
+                            zapisz_tabele_w_chmurze("Produkty")
+                            zapisz_tabele_w_chmurze("RejestrWZ")
+                            zapisz_tabele_w_chmurze("Zamowienia")
+                            zapisz_tabele_w_chmurze("Historia")
+                            
+                            pdf_data = generuj_wz_pdf(nr_wz_auto, datetime.now().strftime("%Y-%m-%d"), wybrany_klient, klient_adres, klient_nip, st.session_state.rejestr_wz[-1]["pozycje"], uwagi_doc)
+                            st.session_state.wz_pdf_do_pobrania = {"nazwa": f"{nr_wz_auto.replace('/', '_')}.pdf", "data": pdf_data}
+                            st.session_state.wz_koszyk = []
+                            st.rerun()
     with tab_rejestr_wz:
         for dokument in reversed(st.session_state.rejestr_wz):
             with st.expander(f"📄 {dokument['nr_wz']} | {dokument['klient_nazwa']}"):
