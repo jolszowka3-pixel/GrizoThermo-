@@ -261,11 +261,10 @@ def zapisz_tabele_w_chmurze(nazwa_tabeli):
 # DANE TWOJEJ FIRMY
 # ==========================================
 MOJA_FIRMA = {
-    "nazwa": "GrizoThermo Sp. z o.o.",
-    "adres": "ul. Fabryczna 14A\n44-100 Katowice",
-    "nip": "NIP: 1234567890",
-    "kontakt": "biuro@grizothermo.pl",
-    "miejscowosc_wystawienia": "Katowice"
+    "nazwa": "Gropak Sp. z o.o.",
+    "adres": "Kaletnicza 30\n43-300 Bielsko- Biała",
+    "nip": "NIP: 5472208816",
+    "miejscowosc_wystawienia": "Wojnicz"
 }
 
 # ==========================================
