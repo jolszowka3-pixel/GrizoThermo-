@@ -432,8 +432,8 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-if 'init_v60' not in st.session_state:
-    st.session_state.init_v60 = True
+if 'init_v61' not in st.session_state:
+    st.session_state.init_v61 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -1093,7 +1093,10 @@ elif menu == "Moduł Production":
 
 elif menu == "Baza Kontrahentów (CRM)":
     st.header("Zarządzanie Bazą Kontrahentów (CRM)")
-    if "crm_edycja_id" not in st.session_state: st.session_state.crm_edycja_id = None
+    
+    # 1. Usuwamy klienta z listy pod adresem "firma_nazwa" zamiast numerycznego idx
+    if "crm_edycja_nazwa" not in st.session_state: st.session_state.crm_edycja_nazwa = None
+    
     tab_przeglad, tab_dodaj = st.tabs(["📋 Rejestr i Modyfikacja Firm", "➕ Dodaj Nowy Podmiot"])
     
     with tab_przeglad:
@@ -1107,32 +1110,36 @@ elif menu == "Baza Kontrahentów (CRM)":
         if df_crm.empty:
             st.info("Brak podmiotów spełniających wybrane kryteria.")
         else:
-            for idx, row in df_crm.iterrows():
+            for _, row in df_crm.iterrows():
+                firma_nazwa = row["Nazwa"]
                 col_dane, col_akcje = st.columns([4, 1])
                 with col_dane:
                     border_style = "item-card-purple" if row["Typ"] == "Dostawca" else "item-card"
                     st.markdown(f'<div class="{border_style}"><div class="card-title">{row["Nazwa"]}</div></div>', unsafe_allow_html=True)
                 with col_akcje:
                     c_edit, c_del = st.columns(2)
-                    if c_edit.button("✏️", key=f"edit_btn_{idx}"): st.session_state.crm_edycja_id = idx; st.rerun()
-                    if c_del.button("🗑️", key=f"del_btn_{idx}"):
-                        st.session_state.kontrahenci = st.session_state.kontrahenci.drop(idx).reset_index(drop=True)
+                    if c_edit.button("✏️", key=f"edit_btn_{firma_nazwa}"): 
+                        st.session_state.crm_edycja_nazwa = firma_nazwa
+                        st.rerun()
+                    if c_del.button("🗑️", key=f"del_btn_{firma_nazwa}"):
+                        st.session_state.kontrahenci = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] != firma_nazwa].reset_index(drop=True)
                         zapisz_tabele_w_chmurze("Kontrahenci")
                         st.rerun()
-        if st.session_state.crm_edycja_id is not None:
-            idx_do_edycji = st.session_state.crm_edycja_id
-            firma_dane = st.session_state.kontrahenci.iloc[idx_do_edycji]
+                        
+        if st.session_state.crm_edycja_nazwa is not None:
+            firma_dane = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == st.session_state.crm_edycja_nazwa].iloc[0]
             with st.form("edycja_firmy_form"):
                 e_nazwa = st.text_input("Nazwa", value=firma_dane["Nazwa"])
                 e_nip = st.text_input("NIP", value=firma_dane["NIP"])
                 e_adres = st.text_input("Adres", value=firma_dane["Adres"])
                 e_typ = st.selectbox("Typ", ["Odbiorca", "Dostawca"], index=0 if firma_dane["Typ"] == "Odbiorca" else 1)
                 if st.form_submit_button("Zapisz"):
-                    st.session_state.kontrahenci.at[idx_do_edycji, "Nazwa"] = e_nazwa.strip()
-                    st.session_state.kontrahenci.at[idx_do_edycji, "NIP"] = e_nip.strip()
-                    st.session_state.kontrahenci.at[idx_do_edycji, "Adres"] = e_adres.strip()
-                    st.session_state.kontrahenci.at[idx_do_edycji, "Typ"] = e_typ
-                    st.session_state.crm_edycja_id = None
+                    idx_prawdziwy = st.session_state.kontrahenci.index[st.session_state.kontrahenci["Nazwa"] == st.session_state.crm_edycja_nazwa][0]
+                    st.session_state.kontrahenci.at[idx_prawdziwy, "Nazwa"] = e_nazwa.strip()
+                    st.session_state.kontrahenci.at[idx_prawdziwy, "NIP"] = e_nip.strip()
+                    st.session_state.kontrahenci.at[idx_prawdziwy, "Adres"] = e_adres.strip()
+                    st.session_state.kontrahenci.at[idx_prawdziwy, "Typ"] = e_typ
+                    st.session_state.crm_edycja_nazwa = None
                     zapisz_tabele_w_chmurze("Kontrahenci")
                     st.rerun()
 
@@ -1258,7 +1265,6 @@ elif menu == "Wydanie Towaru (WZ)":
                         st.rerun()
                 with col_btn2:
                     if st.button("Zatwierdź wydanie i generuj PDF", type="primary", use_container_width=True):
-                        # Ostateczna weryfikacja magazynu (Twarda Blokada)
                         braki_wz = []
                         for pozycja in st.session_state.wz_koszyk:
                             nazwa_w = pozycja["Wariant"]
