@@ -304,7 +304,6 @@ def generuj_plan_pdf(nr_pr, data_wystawienia, mrp_snap):
     pdf.set_text_color(0, 0, 0)
     pdf.ln(5)
     
-    # 1. Wytłaczanie
     if mrp_snap.get("brakuje_jumbo", 0) > 0:
         pdf.set_fill_color(230, 235, 245)
         pdf.set_font("Roboto", "B", 11)
@@ -317,14 +316,12 @@ def generuj_plan_pdf(nr_pr, data_wystawienia, mrp_snap):
         pdf.cell(0, 6, f"- Wymagany Barwnik Zielony: {mrp_snap['req_zie']:g} kg", ln=1)
         pdf.ln(5)
         
-    # 2. Szablony rozkroju
     if mrp_snap.get("potrzeba_jmb", 0) > 0:
         pdf.set_fill_color(230, 235, 245)
         pdf.set_font("Roboto", "B", 11)
         pdf.cell(0, 8, "  KROK 2: ROZKRÓJ WZDŁUŻNY (KONFEKCJA)", ln=1, fill=True)
         pdf.set_font("Roboto", "B", 10)
         pdf.cell(0, 6, f"Łącznie do pocięcia: {mrp_snap['potrzeba_jmb']} szt. rolek Jumbo.", ln=1)
-        
         szablony = mrp_snap.get("szablony", {})
         i = 1
         for klucz, dane in szablony.items():
@@ -336,7 +333,6 @@ def generuj_plan_pdf(nr_pr, data_wystawienia, mrp_snap):
             i += 1
             pdf.ln(2)
             
-    # 3. Oklejanie
     braki_okl = mrp_snap.get("braki_okl", [])
     if braki_okl:
         pdf.set_fill_color(230, 235, 245)
@@ -436,8 +432,8 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-if 'init_v58' not in st.session_state:
-    st.session_state.init_v58 = True
+if 'init_v59' not in st.session_state:
+    st.session_state.init_v59 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -462,6 +458,7 @@ for z in st.session_state.zamowienia:
                 rezerwacje_systemowe[wariant] = rezerwacje_systemowe.get(wariant, 0) + qty
 
 def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
+    # UWAGA: Ta funkcja tylko zbiera ruchy w pamięci! Zapisujemy zbiorczo na końcu bloku.
     uzytkownik = st.session_state.aktualny_uzytkownik if st.session_state.aktualny_uzytkownik else "System"
     nowy_ruch = pd.DataFrame([{
         "Data": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -469,7 +466,6 @@ def dodaj_ruch(typ, dokument, nazwa, ilosc, kontrahent="-"):
         "Ilosc": float(ilosc), "Użytkownik": str(uzytkownik), "Kontrahent": str(kontrahent)
     }])
     st.session_state.historia = pd.concat([st.session_state.historia, nowy_ruch], ignore_index=True)
-    zapisz_tabele_w_chmurze("Historia")
 
 # CSS
 st.markdown("""
@@ -941,7 +937,6 @@ elif menu == "Moduł Production":
                         zapisz_tabele_w_chmurze("ZleceniaProdukcyjne")
                         zapisz_tabele_w_chmurze("Zamowienia")
                         
-                        # Generowanie profesjonalnego planu dla hali!
                         pdf_data = generuj_plan_pdf(nr_pr_auto, datetime.now().strftime("%Y-%m-%d %H:%M"), mrp_data)
                         
                         st.session_state.plan_hali_do_pobrania = {
@@ -980,6 +975,7 @@ elif menu == "Moduł Production":
                     st.session_state.jumbo_counter += 1
                     zapisz_tabele_w_chmurze("Polprodukty")
                     zapisz_tabele_w_chmurze("Komponenty")
+                    zapisz_tabele_w_chmurze("Historia")
                     st.success("Zaksięgowano.")
                     st.rerun()
 
@@ -999,6 +995,7 @@ elif menu == "Moduł Production":
             st.session_state.konf_counter += 1
             zapisz_tabele_w_chmurze("Polprodukty")
             zapisz_tabele_w_chmurze("Produkty")
+            zapisz_tabele_w_chmurze("Historia")
             st.success("Zapisano.")
             st.rerun()
 
@@ -1033,6 +1030,7 @@ elif menu == "Moduł Production":
                     dodaj_ruch("RW", nr_okl_auto, f"GrizoThermo+ {szerokosc_wybrana}cm - Nieoklejona (13mb)", int(ile_okleic), "Hala")
                     st.session_state.okl_counter += 1
                     zapisz_tabele_w_chmurze("Produkty")
+                    zapisz_tabele_w_chmurze("Historia")
                     st.success("Zakończono. Towar został przeksiegowany na wariant oklejony.")
                     st.rerun()
 
@@ -1090,6 +1088,7 @@ elif menu == "Moduł Production":
                         zapisz_tabele_w_chmurze("Produkty")
                         zapisz_tabele_w_chmurze("ZleceniaProdukcyjne")
                         zapisz_tabele_w_chmurze("Zamowienia")
+                        zapisz_tabele_w_chmurze("Historia")
                         st.success("Zrealizowano pomyślnie. Towar trafił na magazyn.")
                         st.rerun()
 
@@ -1175,6 +1174,7 @@ elif menu == "Przyjęcie Towaru (PZ)":
                         st.session_state.komponenty.at[idx, "Stan"] += float(i)
                         dodaj_ruch("PZ", n, k, float(i), d)
                         zapisz_tabele_w_chmurze("Komponenty")
+                        zapisz_tabele_w_chmurze("Historia")
                         st.success("Zapisano.")
                         st.rerun()
             else:
@@ -1211,7 +1211,11 @@ elif menu == "Wydanie Towaru (WZ)":
                         st.session_state.wz_koszyk = [{"Wariant": p["Wariant"], "Ilosc": int(p["Ilość (szt.)"])} for p in z["pozycje"]]
                         st.rerun()
             
-            wybrany_klient = st.selectbox("Nabywca", odbiorcy)
+            idx_klienta = 0
+            if st.session_state.wybrany_klient_wz and st.session_state.wybrany_klient_wz in odbiorcy:
+                idx_klienta = odbiorcy.index(st.session_state.wybrany_klient_wz)
+            
+            wybrany_klient = st.selectbox("Nabywca", odbiorcy, index=idx_klienta)
             uwagi_doc = st.text_input("Uwagi", value="Dostawa z magazynu głównego.")
             
             dostepne_opcje = []
@@ -1219,7 +1223,10 @@ elif menu == "Wydanie Towaru (WZ)":
             for _, row in st.session_state.produkty.iterrows():
                 wariant_nazwa = row["Wariant"]
                 stan_fizyczny = int(row["Stan"])
-                wolne_dostepne = stan_fizyczny - rezerwacje_systemowe.get(wariant_nazwa, 0)
+                zarezerwowane = rezerwacje_systemowe.get(wariant_nazwa, 0)
+                w_koszyku_juz_jest = sum([x["Ilosc"] for x in st.session_state.wz_koszyk if x["Wariant"] == wariant_nazwa])
+                
+                wolne_dostepne = stan_fizyczny - zarezerwowane - w_koszyku_juz_jest
                 if wolne_dostepne > 0:
                     opcja_string = f"{wariant_nazwa} (Dostępne z wolnej puli: {wolne_dostepne} szt.)"
                     dostepne_opcje.append(opcja_string)
@@ -1231,45 +1238,67 @@ elif menu == "Wydanie Towaru (WZ)":
                 ile_w = st.number_input("Ilość do wydania", min_value=1, max_value=max_w_opcji, value=1)
                 if st.button("Dodaj do dokumentu"):
                     prawdziwa_nazwa = wybrana_opcja.split(" (Dostępne")[0]
-                    st.session_state.wz_koszyk.append({"Wariant": prawdziwa_nazwa, "Ilosc": int(ile_w)})
+                    istnieje = False
+                    for item in st.session_state.wz_koszyk:
+                        if item["Wariant"] == prawdziwa_nazwa:
+                            item["Ilosc"] += int(ile_w)
+                            istnieje = True
+                            break
+                    if not istnieje:
+                        st.session_state.wz_koszyk.append({"Wariant": prawdziwa_nazwa, "Ilosc": int(ile_w)})
                     st.rerun()
             else:
-                st.info("Brak wolnego asortymentu do wydania z ręki (cały magazyn jest pusty lub w całości zarezerwowany pod ZK).")
+                st.info("Brak wolnego asortymentu do wydania z ręki (cały magazyn jest pusty, w całości zarezerwowany pod ZK, lub wszystko jest w koszyku).")
                 
             if st.session_state.wz_koszyk:
                 st.dataframe(pd.DataFrame(st.session_state.wz_koszyk))
                 if st.button("Zatwierdź wydanie i generuj PDF", type="primary", use_container_width=True):
-                    data_dzis_str = datetime.now().strftime("%Y/%m/%d")
-                    nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
-                    
-                    dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
-                    klient_adres = dane_klienta["Adres"]
-                    klient_nip = dane_klienta["NIP"]
+                    # Ostateczna weryfikacja magazynu (Twarda Blokada)
+                    braki_wz = []
                     for pozycja in st.session_state.wz_koszyk:
                         nazwa_w = pozycja["Wariant"]
                         ile_w = pozycja["Ilosc"]
                         idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
-                        st.session_state.produkty.at[idx, "Stan"] -= int(ile_w)
-                        dodaj_ruch("WZ", nr_wz_auto, nazwa_w, int(ile_w), wybrany_klient)
-                    
-                    st.session_state.rejestr_wz.append({
-                        "nr_wz": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "klient_nazwa": wybrany_klient,
-                        "klient_adres": klient_adres, "klient_nip": klient_nip, "pozycje": st.session_state.wz_koszyk.copy(), "uwagi": uwagi_doc
-                    })
-                    st.session_state.wz_counter += 1
-                    if st.session_state.powiazane_zk:
-                        for zmw in st.session_state.zamowienia:
-                            if zmw["id"] == st.session_state.powiazane_zk: zmw["Status"] = "Zrealizowane"; break
-                        st.session_state.powiazane_zk = None
-                    
-                    zapisz_tabele_w_chmurze("Produkty")
-                    zapisz_tabele_w_chmurze("RejestrWZ")
-                    zapisz_tabele_w_chmurze("Zamowienia")
-                    
-                    pdf_data = generuj_wz_pdf(nr_wz_auto, datetime.now().strftime("%Y-%m-%d"), wybrany_klient, klient_adres, klient_nip, st.session_state.rejestr_wz[-1]["pozycje"], uwagi_doc)
-                    st.session_state.wz_pdf_do_pobrania = {"nazwa": f"{nr_wz_auto.replace('/', '_')}.pdf", "data": pdf_data}
-                    st.session_state.wz_koszyk = []
-                    st.rerun()
+                        if int(st.session_state.produkty.at[idx, "Stan"]) < ile_w:
+                            braki_wz.append(nazwa_w)
+                            
+                    if braki_wz:
+                        st.error(f"Operacja odrzucona! Brak fizycznego towaru na regale dla: {', '.join(braki_wz)}. Prawdopodobnie towar został wydany w międzyczasie.")
+                    else:
+                        data_dzis_str = datetime.now().strftime("%Y/%m/%d")
+                        nr_wz_auto = f"WZ/{data_dzis_str}/{st.session_state.wz_counter:03d}"
+                        
+                        dane_klienta = st.session_state.kontrahenci[st.session_state.kontrahenci["Nazwa"] == wybrany_klient].iloc[0]
+                        klient_adres = dane_klienta["Adres"]
+                        klient_nip = dane_klienta["NIP"]
+                        for pozycja in st.session_state.wz_koszyk:
+                            nazwa_w = pozycja["Wariant"]
+                            ile_w = pozycja["Ilosc"]
+                            idx = st.session_state.produkty.index[st.session_state.produkty["Wariant"] == nazwa_w][0]
+                            st.session_state.produkty.at[idx, "Stan"] -= int(ile_w)
+                            dodaj_ruch("WZ", nr_wz_auto, nazwa_w, int(ile_w), wybrany_klient)
+                        
+                        st.session_state.rejestr_wz.append({
+                            "nr_wz": nr_wz_auto, "data": datetime.now().strftime("%Y-%m-%d %H:%M"), "klient_nazwa": wybrany_klient,
+                            "klient_adres": klient_adres, "klient_nip": klient_nip, "pozycje": st.session_state.wz_koszyk.copy(), "uwagi": uwagi_doc
+                        })
+                        st.session_state.wz_counter += 1
+                        
+                        if st.session_state.powiazane_zk:
+                            for zmw in st.session_state.zamowienia:
+                                if zmw["id"] == st.session_state.powiazane_zk: zmw["Status"] = "Zrealizowane"; break
+                            st.session_state.powiazane_zk = None
+                            st.session_state.wybrany_klient_wz = None
+                        
+                        zapisz_tabele_w_chmurze("Produkty")
+                        zapisz_tabele_w_chmurze("RejestrWZ")
+                        zapisz_tabele_w_chmurze("Zamowienia")
+                        zapisz_tabele_w_chmurze("Historia")
+                        
+                        pdf_data = generuj_wz_pdf(nr_wz_auto, datetime.now().strftime("%Y-%m-%d"), wybrany_klient, klient_adres, klient_nip, st.session_state.rejestr_wz[-1]["pozycje"], uwagi_doc)
+                        st.session_state.wz_pdf_do_pobrania = {"nazwa": f"{nr_wz_auto.replace('/', '_')}.pdf", "data": pdf_data}
+                        st.session_state.wz_koszyk = []
+                        st.rerun()
     with tab_rejestr_wz:
         for dokument in reversed(st.session_state.rejestr_wz):
             with st.expander(f"📄 {dokument['nr_wz']} | {dokument['klient_nazwa']}"):
