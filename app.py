@@ -285,6 +285,76 @@ def pobierz_czcionki():
     return reg_path, bold_path
 
 # ==========================================
+# GENEROWANIE PLANU PRODUKCJI DLA HALI (PDF)
+# ==========================================
+def generuj_plan_pdf(nr_pr, data_wystawienia, mrp_snap):
+    font_path, font_bold_path = pobierz_czcionki()
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.add_font("Roboto", "", font_path, uni=True)
+    pdf.add_font("Roboto", "B", font_bold_path, uni=True)
+    
+    pdf.set_fill_color(240, 240, 240)
+    pdf.set_font("Roboto", "B", 15)
+    pdf.cell(0, 12, f"PLAN PRODUKCJI DLA HALI - {nr_pr}", border=0, ln=1, align='C', fill=True)
+    
+    pdf.set_font("Roboto", "", 9)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 6, f"Data wygenerowania: {data_wystawienia}", border=0, ln=1, align='R')
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(5)
+    
+    # 1. Wytłaczanie
+    if mrp_snap.get("brakuje_jumbo", 0) > 0:
+        pdf.set_fill_color(230, 235, 245)
+        pdf.set_font("Roboto", "B", 11)
+        pdf.cell(0, 8, "  KROK 1: WYTŁACZANIE ROLEK JUMBO", ln=1, fill=True)
+        pdf.set_font("Roboto", "B", 10)
+        pdf.cell(0, 6, f"Do wyprodukowania: {mrp_snap['brakuje_jumbo']} szt. rolek Jumbo.", ln=1)
+        pdf.set_font("Roboto", "", 10)
+        pdf.cell(0, 6, f"- Wymagane Aluminium: {mrp_snap['req_alu']:g} mb", ln=1)
+        pdf.cell(0, 6, f"- Wymagany Barwnik Biały: {mrp_snap['req_bia']:g} kg", ln=1)
+        pdf.cell(0, 6, f"- Wymagany Barwnik Zielony: {mrp_snap['req_zie']:g} kg", ln=1)
+        pdf.ln(5)
+        
+    # 2. Szablony rozkroju
+    if mrp_snap.get("potrzeba_jmb", 0) > 0:
+        pdf.set_fill_color(230, 235, 245)
+        pdf.set_font("Roboto", "B", 11)
+        pdf.cell(0, 8, "  KROK 2: ROZKRÓJ WZDŁUŻNY (KONFEKCJA)", ln=1, fill=True)
+        pdf.set_font("Roboto", "B", 10)
+        pdf.cell(0, 6, f"Łącznie do pocięcia: {mrp_snap['potrzeba_jmb']} szt. rolek Jumbo.", ln=1)
+        
+        szablony = mrp_snap.get("szablony", {})
+        i = 1
+        for klucz, dane in szablony.items():
+            wzor_txt = " | ".join([f"{qty}x {k.split(' - ')[0].replace('GrizoThermo+ ', '')}" for k, qty in dane["wzor"].items()])
+            pdf.set_font("Roboto", "B", 9)
+            pdf.cell(0, 6, f"SZABLON NR {i} (Ciąć tak {dane['ile']} szt. rolek Jumbo):", ln=1)
+            pdf.set_font("Roboto", "", 9)
+            pdf.multi_cell(0, 5, f"Układ cięcia: {wzor_txt}", border=0)
+            i += 1
+            pdf.ln(2)
+            
+    # 3. Oklejanie
+    braki_okl = mrp_snap.get("braki_okl", [])
+    if braki_okl:
+        pdf.set_fill_color(230, 235, 245)
+        pdf.set_font("Roboto", "B", 11)
+        pdf.cell(0, 8, "  KROK 3: OKLEJANIE KRAWĘDZI", ln=1, fill=True)
+        pdf.set_font("Roboto", "", 10)
+        for b in braki_okl:
+            pdf.cell(0, 6, f"- Pobrać z regału: {b['Z_czego']} -> Okleić: {b['Brak_szt']} szt.", ln=1)
+        pdf.ln(5)
+    
+    pdf.ln(15)
+    pdf.set_font("Roboto", "", 8.5)
+    pdf.cell(60, 5, "..........................................................", align='C', ln=1)
+    pdf.cell(60, 5, "Podpis Odbierającego (Kierownik Zmiany)", align='C')
+    
+    return pdf.output(dest="S").encode("latin-1")
+
+# ==========================================
 # FUNKCJA POMOCNICZA DO GENEROWANIA WZ PDF
 # ==========================================
 def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, pozycje, uwagi):
@@ -366,8 +436,8 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-if 'init_v57' not in st.session_state:
-    st.session_state.init_v57 = True
+if 'init_v58' not in st.session_state:
+    st.session_state.init_v58 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -871,17 +941,11 @@ elif menu == "Moduł Production":
                         zapisz_tabele_w_chmurze("ZleceniaProdukcyjne")
                         zapisz_tabele_w_chmurze("Zamowienia")
                         
-                        font_path, font_bold_path = pobierz_czcionki()
-                        pdf = FPDF()
-                        pdf.add_page()
-                        pdf.add_font("Roboto", "", font_path, uni=True)
-                        pdf.add_font("Roboto", "B", font_bold_path, uni=True)
-                        pdf.set_fill_color(240, 240, 240)
-                        pdf.set_font("Roboto", "B", 15)
-                        pdf.cell(0, 12, f"KOMPLEKSOWY PLAN PRODUKCJI - ZLECENIE {nr_pr_auto}", border=0, ln=1, align='C', fill=True)
+                        # Generowanie profesjonalnego planu dla hali!
+                        pdf_data = generuj_plan_pdf(nr_pr_auto, datetime.now().strftime("%Y-%m-%d %H:%M"), mrp_data)
                         
                         st.session_state.plan_hali_do_pobrania = {
-                            "nazwa": f"Plan_Produkcji_{nr_pr_auto.replace('/', '_')}.pdf", "data": pdf.output(dest="S").encode("latin-1")
+                            "nazwa": f"Plan_Produkcji_{nr_pr_auto.replace('/', '_')}.pdf", "data": pdf_data
                         }
                         st.rerun()
 
