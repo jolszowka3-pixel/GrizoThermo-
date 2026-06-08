@@ -270,18 +270,30 @@ MOJA_FIRMA = {
 }
 
 # ==========================================
-# POBIERANIE CZCIONEK
+# POBIERANIE CZCIONEK Z ZABEZPIECZENIEM
 # ==========================================
 @st.cache_resource
 def pobierz_czcionki():
     reg_path = "Roboto-Regular.ttf"
     bold_path = "Roboto-Bold.ttf"
+    
+    # KROK 1: Usuwamy stare, "uszkodzone" pliki (błędy pobierania Google ważą kilka bajtów)
+    for path in [reg_path, bold_path]:
+        if os.path.exists(path) and os.path.getsize(path) < 10000:
+            try: os.remove(path)
+            except: pass
+
+    # KROK 2: Nowe, w pełni stabilne linki bezpośrednie do czcionek z oficjalnego repozytorium
+    url_reg = "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/Roboto-Regular.ttf"
+    url_bold = "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/Roboto-Bold.ttf"
+    
     if not os.path.exists(reg_path):
-        try: urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Regular.ttf", reg_path)
+        try: urllib.request.urlretrieve(url_reg, reg_path)
         except: pass
     if not os.path.exists(bold_path):
-        try: urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf", bold_path)
+        try: urllib.request.urlretrieve(url_bold, bold_path)
         except: pass
+        
     return reg_path, bold_path
 
 # ==========================================
@@ -291,14 +303,20 @@ def generuj_plan_pdf(nr_pr, data_wystawienia, mrp_snap):
     font_path, font_bold_path = pobierz_czcionki()
     pdf = FPDF()
     pdf.add_page()
-    pdf.add_font("Roboto", "", font_path, uni=True)
-    pdf.add_font("Roboto", "B", font_bold_path, uni=True)
     
+    # Dodatkowe zabezpieczenie: jeśli pobieranie by się nie udało, wracamy do brzydszej czcionki systemowej bez błędu
+    try:
+        pdf.add_font("Roboto", "", font_path, uni=True)
+        pdf.add_font("Roboto", "B", font_bold_path, uni=True)
+        czcionka = "Roboto"
+    except:
+        czcionka = "Arial"
+        
     pdf.set_fill_color(240, 240, 240)
-    pdf.set_font("Roboto", "B", 15)
+    pdf.set_font(czcionka, "B", 15)
     pdf.cell(0, 12, f"PLAN PRODUKCJI DLA HALI - {nr_pr}", border=0, ln=1, align='C', fill=True)
     
-    pdf.set_font("Roboto", "", 9)
+    pdf.set_font(czcionka, "", 9)
     pdf.set_text_color(100, 100, 100)
     pdf.cell(0, 6, f"Data wygenerowania: {data_wystawienia}", border=0, ln=1, align='R')
     pdf.set_text_color(0, 0, 0)
@@ -306,47 +324,47 @@ def generuj_plan_pdf(nr_pr, data_wystawienia, mrp_snap):
     
     if mrp_snap.get("brakuje_jumbo", 0) > 0:
         pdf.set_fill_color(230, 235, 245)
-        pdf.set_font("Roboto", "B", 11)
+        pdf.set_font(czcionka, "B", 11)
         pdf.cell(0, 8, "  KROK 1: WYTŁACZANIE ROLEK JUMBO", ln=1, fill=True)
-        pdf.set_font("Roboto", "B", 10)
+        pdf.set_font(czcionka, "B", 10)
         pdf.cell(0, 6, f"Do wyprodukowania: {mrp_snap['brakuje_jumbo']} szt. rolek Jumbo.", ln=1)
-        pdf.set_font("Roboto", "", 10)
+        pdf.set_font(czcionka, "", 10)
         pdf.cell(0, 6, f"- Wymagane Aluminium: {mrp_snap['req_alu']:g} mb", ln=1)
-        pdf.cell(0, 6, f"- Wymagany Barwnik Biały: {mrp_snap['req_bia']:g} kg", ln=1)
+        pdf.cell(0, 6, f"- Wymagany Barwnik Bialy: {mrp_snap['req_bia']:g} kg", ln=1)
         pdf.cell(0, 6, f"- Wymagany Barwnik Zielony: {mrp_snap['req_zie']:g} kg", ln=1)
         pdf.ln(5)
         
     if mrp_snap.get("potrzeba_jmb", 0) > 0:
         pdf.set_fill_color(230, 235, 245)
-        pdf.set_font("Roboto", "B", 11)
+        pdf.set_font(czcionka, "B", 11)
         pdf.cell(0, 8, "  KROK 2: ROZKRÓJ WZDŁUŻNY (KONFEKCJA)", ln=1, fill=True)
-        pdf.set_font("Roboto", "B", 10)
-        pdf.cell(0, 6, f"Łącznie do pocięcia: {mrp_snap['potrzeba_jmb']} szt. rolek Jumbo.", ln=1)
+        pdf.set_font(czcionka, "B", 10)
+        pdf.cell(0, 6, f"Lacznie do pociecia: {mrp_snap['potrzeba_jmb']} szt. rolek Jumbo.", ln=1)
         szablony = mrp_snap.get("szablony", {})
         i = 1
         for klucz, dane in szablony.items():
             wzor_txt = " | ".join([f"{qty}x {k.split(' - ')[0].replace('GrizoThermo+ ', '')}" for k, qty in dane["wzor"].items()])
-            pdf.set_font("Roboto", "B", 9)
-            pdf.cell(0, 6, f"SZABLON NR {i} (Ciąć tak {dane['ile']} szt. rolek Jumbo):", ln=1)
-            pdf.set_font("Roboto", "", 9)
-            pdf.multi_cell(0, 5, f"Układ cięcia: {wzor_txt}", border=0)
+            pdf.set_font(czcionka, "B", 9)
+            pdf.cell(0, 6, f"SZABLON NR {i} (Ciac tak {dane['ile']} szt. rolek Jumbo):", ln=1)
+            pdf.set_font(czcionka, "", 9)
+            pdf.multi_cell(0, 5, f"Uklad ciecia: {wzor_txt}", border=0)
             i += 1
             pdf.ln(2)
             
     braki_okl = mrp_snap.get("braki_okl", [])
     if braki_okl:
         pdf.set_fill_color(230, 235, 245)
-        pdf.set_font("Roboto", "B", 11)
+        pdf.set_font(czcionka, "B", 11)
         pdf.cell(0, 8, "  KROK 3: OKLEJANIE KRAWĘDZI", ln=1, fill=True)
-        pdf.set_font("Roboto", "", 10)
+        pdf.set_font(czcionka, "", 10)
         for b in braki_okl:
-            pdf.cell(0, 6, f"- Pobrać z regału: {b['Z_czego']} -> Okleić: {b['Brak_szt']} szt.", ln=1)
+            pdf.cell(0, 6, f"- Pobrac z regalu: {b['Z_czego']} -> Okleic: {b['Brak_szt']} szt.", ln=1)
         pdf.ln(5)
     
     pdf.ln(15)
-    pdf.set_font("Roboto", "", 8.5)
+    pdf.set_font(czcionka, "", 8.5)
     pdf.cell(60, 5, "..........................................................", align='C', ln=1)
-    pdf.cell(60, 5, "Podpis Odbierającego (Kierownik Zmiany)", align='C')
+    pdf.cell(60, 5, "Podpis Odbierajacego (Kierownik Zmiany)", align='C')
     
     return pdf.output(dest="S").encode("latin-1")
 
@@ -357,14 +375,19 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
     font_path, font_bold_path = pobierz_czcionki()
     pdf = FPDF()
     pdf.add_page()
-    pdf.add_font("Roboto", "", font_path, uni=True)
-    pdf.add_font("Roboto", "B", font_bold_path, uni=True)
+    
+    try:
+        pdf.add_font("Roboto", "", font_path, uni=True)
+        pdf.add_font("Roboto", "B", font_bold_path, uni=True)
+        czcionka = "Roboto"
+    except:
+        czcionka = "Arial"
     
     pdf.set_fill_color(240, 240, 240)
-    pdf.set_font("Roboto", "B", 15)
+    pdf.set_font(czcionka, "B", 15)
     pdf.cell(0, 12, f"WYDANIE ZEWNĘTRZNE (WZ) NR {nr_wz}", border=0, ln=1, align='C', fill=True)
     
-    pdf.set_font("Roboto", "", 9)
+    pdf.set_font(czcionka, "", 9)
     pdf.set_text_color(100, 100, 100)
     pdf.cell(0, 6, f"Data wydania: {data_wydania}   |   Miejsce wystawienia: {MOJA_FIRMA['miejscowosc_wystawienia']}", border=0, ln=1, align='R')
     pdf.set_text_color(0, 0, 0)
@@ -372,34 +395,34 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
     
     y_start = pdf.get_y()
     pdf.set_fill_color(248, 248, 248)
-    pdf.set_font("Roboto", "B", 10)
+    pdf.set_font(czcionka, "B", 10)
     pdf.cell(90, 7, "  SPRZEDAWCA / WYSTAWCA", border=0, ln=1, fill=True)
-    pdf.set_font("Roboto", "", 9)
+    pdf.set_font(czcionka, "", 9)
     pdf.multi_cell(90, 5, f"{MOJA_FIRMA['nazwa']}\n{MOJA_FIRMA['adres']}\n{MOJA_FIRMA['nip']}\n{MOJA_FIRMA['kontakt']}", border=0)
     y_left = pdf.get_y()
     
     pdf.set_xy(105, y_start)
-    pdf.set_font("Roboto", "B", 10)
+    pdf.set_font(czcionka, "B", 10)
     pdf.cell(90, 7, "  NABYWCA / ODBIORCA", border=0, ln=1, fill=True)
     pdf.set_xy(105, y_start + 7)
-    pdf.set_font("Roboto", "", 9)
+    pdf.set_font(czcionka, "", 9)
     nip_czysty = f"NIP: {klient_nip}" if klient_nip and str(klient_nip).strip() else ""
     pdf.multi_cell(90, 5, f"{klient_nazwa}\n{klient_adres}\n{nip_czysty}", border=0)
     y_right = pdf.get_y()
     
     pdf.set_y(max(y_left, y_right) + 12)
-    pdf.set_font("Roboto", "B", 10)
+    pdf.set_font(czcionka, "B", 10)
     pdf.cell(0, 8, "POZYCJE DOKUMENTU", border="B", ln=1)
     pdf.ln(3)
     
     pdf.set_fill_color(230, 235, 245)
-    pdf.set_font("Roboto", "B", 9)
+    pdf.set_font(czcionka, "B", 9)
     pdf.cell(15, 8, "Lp.", border=1, align='C', fill=True)
     pdf.cell(115, 8, "Nazwa asortymentu", border=1, align='L', fill=True)
-    pdf.cell(30, 8, "Ilość", border=1, align='C', fill=True)
+    pdf.cell(30, 8, "Ilosc", border=1, align='C', fill=True)
     pdf.cell(30, 8, "Jm.", border=1, align='C', ln=1, fill=True)
     
-    pdf.set_font("Roboto", "", 9)
+    pdf.set_font(czcionka, "", 9)
     
     for lp, pozycja in enumerate(pozycje, start=1):
         pdf.cell(15, 8, str(lp), border=1, align='C')
@@ -409,31 +432,31 @@ def generuj_wz_pdf(nr_wz, data_wydania, klient_nazwa, klient_adres, klient_nip, 
     
     pdf.ln(10)
     if uwagi and uwagi.strip():
-        pdf.set_font("Roboto", "B", 9)
+        pdf.set_font(czcionka, "B", 9)
         pdf.cell(15, 5, "Uwagi:", border=0)
-        pdf.set_font("Roboto", "", 9)
+        pdf.set_font(czcionka, "", 9)
         pdf.multi_cell(0, 5, uwagi.strip(), border=0)
     
     pdf.ln(25)
     y_sig = pdf.get_y()
-    pdf.set_font("Roboto", "", 8.5)
+    pdf.set_font(czcionka, "", 8.5)
     pdf.set_xy(15, y_sig)
     pdf.cell(60, 5, "..........................................................", align='C', ln=1)
     pdf.set_x(15)
-    pdf.cell(60, 5, "Wystawił (osoba uprawniona)", align='C')
+    pdf.cell(60, 5, "Wystawil (osoba uprawniona)", align='C')
     
     pdf.set_xy(135, y_sig)
     pdf.cell(60, 5, "..........................................................", align='C', ln=1)
     pdf.set_x(135)
-    pdf.cell(60, 5, "Odebrał (czytelny podpis)", align='C')
+    pdf.cell(60, 5, "Odebral (czytelny podpis)", align='C')
     
     return pdf.output(dest="S").encode("latin-1")
 
 # ==========================================
 # 1. INICJALIZACJA SYSTEMU I SYNCHRONIZACJA Z CHMURĄ
 # ==========================================
-if 'init_v61' not in st.session_state:
-    st.session_state.init_v61 = True
+if 'init_v62' not in st.session_state:
+    st.session_state.init_v62 = True
     st.session_state.zalogowany = False
     st.session_state.aktualny_uzytkownik = None
     st.session_state.aktualne_uprawnienia = {}
@@ -746,19 +769,23 @@ elif menu == "Zamówienia (ZK)":
                 font_path, font_bold_path = pobierz_czcionki()
                 pdf = FPDF()
                 pdf.add_page()
-                pdf.add_font("Roboto", "", font_path, uni=True)
-                pdf.add_font("Roboto", "B", font_bold_path, uni=True)
+                try:
+                    pdf.add_font("Roboto", "", font_path, uni=True)
+                    pdf.add_font("Roboto", "B", font_bold_path, uni=True)
+                    czcionka = "Roboto"
+                except:
+                    czcionka = "Arial"
                 pdf.set_fill_color(240, 240, 240)
-                pdf.set_font("Roboto", "B", 14)
+                pdf.set_font(czcionka, "B", 14)
                 pdf.cell(0, 12, "ZBIORCZA LISTA ZAMÓWIEŃ (ZK)", border=0, ln=1, align='C', fill=True)
-                pdf.set_font("Roboto", "", 9)
+                pdf.set_font(czcionka, "", 9)
                 pdf.cell(0, 6, f"Wygenerowano: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", border=0, ln=1, align='C')
                 pdf.ln(6)
                 for z in reversed(st.session_state.zamowienia):
-                    pdf.set_font("Roboto", "B", 10)
+                    pdf.set_font(czcionka, "B", 10)
                     pdf.set_fill_color(248, 248, 248)
                     pdf.cell(0, 8, f" {z['id']} | Klient: {z['klient']} | Status: {z['Status']}", border=1, ln=1, fill=True)
-                    pdf.set_font("Roboto", "", 9)
+                    pdf.set_font(czcionka, "", 9)
                     for p in z['pozycje']:
                         pdf.cell(10, 6, "-", align='R')
                         pdf.cell(120, 6, p['Wariant'])
@@ -1094,7 +1121,6 @@ elif menu == "Moduł Production":
 elif menu == "Baza Kontrahentów (CRM)":
     st.header("Zarządzanie Bazą Kontrahentów (CRM)")
     
-    # 1. Usuwamy klienta z listy pod adresem "firma_nazwa" zamiast numerycznego idx
     if "crm_edycja_nazwa" not in st.session_state: st.session_state.crm_edycja_nazwa = None
     
     tab_przeglad, tab_dodaj = st.tabs(["📋 Rejestr i Modyfikacja Firm", "➕ Dodaj Nowy Podmiot"])
